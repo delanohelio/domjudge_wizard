@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DOMjudge Review</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <div class="screen-links">
+            <a href="index.html" class="screen-link active">Visualizacao</a>
+            <a href="creator.html" class="screen-link">Criacao</a>
+          </div>
+          <p class="eyebrow">DOMjudge review</p>
+          <h1>Leitura rapida de respostas e codigos</h1>
+          <p class="subtitle">
+            Navegue por questao, estudante ou contest. Sempre mostre a resposta correta
+            primeiro e compare com as demais submetidas.
+          </p>
+        </div>
+        <div class="dataset-card">
+          <p class="card-title">Fonte de dados</p>
+          <div class="source-switch" role="group" aria-label="Fonte dos dados">
+            <label class="source-option">
+              <input type="radio" name="dataSource" value="dataset" checked />
+              <span>Dataset local</span>
+            </label>
+            <label class="source-option">
+              <input type="radio" name="dataSource" value="api" />
+              <span>API DOMjudge</span>
+            </label>
+          </div>
+
+          <div id="datasetFields" class="source-fields">
+            <label for="datasetBase">Pasta do dataset</label>
+            <div class="row">
+              <input id="datasetBase" type="text" value="" placeholder="Nenhuma pasta selecionada" readonly />
+              <button id="pickDatasetFolderBtn" class="badge dim" type="button">Selecionar pasta</button>
+            </div>
+            <input id="datasetFolderInput" type="file" webkitdirectory directory multiple hidden />
+          </div>
+
+          <div id="apiFields" class="source-fields" hidden>
+            <label for="apiBase">API base</label>
+            <input id="apiBase" type="text" value="https://coderunner.cin.ufpe.br/api/v4" />
+            <label for="apiUser">Usuario API</label>
+            <input id="apiUser" type="text" />
+            <label for="apiPassword">Senha API</label>
+            <input id="apiPassword" type="password" />
+          </div>
+
+          <div class="row">
+            <button id="reloadBtn" class="primary">Carregar</button>
+          </div>
+          <div id="apiActions" class="row" hidden>
+            <button id="saveDatasetBtn" class="badge dim" type="button" disabled>Salvar dataset (.zip)</button>
+          </div>
+          <p id="dataHint" class="hint">Use um servidor local para permitir fetch dos arquivos JSON.</p>
+        </div>
+      </header>
+
+      <section class="view-select">
+        <button data-view="question" class="view-btn active">Por questao</button>
+        <button data-view="student" class="view-btn">Por estudante</button>
+        <button data-view="contest" class="view-btn">Por contest</button>
+        <button data-view="step" class="view-btn">Aluno por vez</button>
+        <button data-view="summary" class="view-btn">Resumo</button>
+      </section>
+
+      <section class="controls">
+        <div class="control" data-control="contest">
+          <label for="contestSelect">Contest</label>
+          <select id="contestSelect" class="multi" multiple size="6"></select>
+        </div>
+        <div class="control" data-control="problem">
+          <label for="problemSelect">Questao</label>
+          <select id="problemSelect" class="multi" multiple size="6"></select>
+        </div>
+        <div class="control" data-control="team">
+          <label for="teamSelect">Estudante (team)</label>
+          <select id="teamSelect"></select>
+        </div>
+        <div class="control" data-control="status">
+          <label for="statusSelect">Filtrar por status</label>
+          <select id="statusSelect" class="multi" multiple size="6"></select>
+        </div>
+        <div class="control" data-control="filterProblem">
+          <label for="filterProblemSelect">Filtrar por questao</label>
+          <select id="filterProblemSelect" class="multi" multiple size="6"></select>
+        </div>
+        <div class="control" data-control="filterTeam">
+          <label for="filterTeamSelect">Filtrar por estudante</label>
+          <select id="filterTeamSelect"></select>
+        </div>
+      </section>
+
+      <section id="status" class="status"></section>
+      <section id="results" class="results"></section>
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

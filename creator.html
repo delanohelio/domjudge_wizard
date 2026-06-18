@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DOMjudge Creator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <div class="screen-links">
+            <a href="index.html" class="screen-link">Visualizacao</a>
+            <a href="creator.html" class="screen-link active">Criacao</a>
+          </div>
+          <p class="eyebrow">DOMjudge creator</p>
+          <h1>Criar nova questao</h1>
+          <p class="subtitle">Preencha o formulario, gere um pacote ZIP e envie para o DOMjudge.</p>
+        </div>
+      </header>
+
+      <section class="creator">
+        <article class="card">
+          <h3>Novo problema para DOMjudge</h3>
+          <small>Preencha os dados, gere ZIP de importacao ou envie via API.</small>
+          <div class="tests-actions">
+            <input id="importZipInput" type="file" accept=".zip" />
+            <button id="importZipBtn" type="button" class="badge dim">Carregar estrutura do ZIP</button>
+          </div>
+
+          <div class="creator-grid">
+            <div class="creator-field">
+              <label for="creatorName">Nome da questao</label>
+              <input id="creatorName" type="text" placeholder="Ex.: Soma de Vetores" />
+            </div>
+            <div class="creator-field">
+              <label for="creatorShortname">Shortname (opcional)</label>
+              <input id="creatorShortname" type="text" placeholder="Ex.: soma-vetores" />
+            </div>
+            <div class="creator-field">
+              <label for="creatorTime">Tempo limite (s)</label>
+              <input id="creatorTime" type="number" min="1" value="1" />
+            </div>
+            <div class="creator-field">
+              <label for="creatorMemory">Memoria limite (MB)</label>
+              <input id="creatorMemory" type="number" min="16" value="512" />
+            </div>
+            <div class="creator-field full">
+              <label for="creatorMarkdown">Enunciado em Markdown</label>
+              <textarea id="creatorMarkdown" rows="12" placeholder="# Titulo&#10;Descreva o problema aqui..."></textarea>
+            </div>
+          </div>
+
+          <h4>Testes</h4>
+          <div id="testsContainer" class="tests-container"></div>
+          <div class="tests-actions">
+            <button id="addSampleTest" type="button" class="badge dim">Adicionar sample</button>
+            <button id="addSecretTest" type="button" class="badge dim">Adicionar secret</button>
+          </div>
+
+          <h4>Integracao com API (opcional)</h4>
+          <div class="creator-grid">
+            <div class="creator-field">
+              <label for="creatorApiBase">API base</label>
+              <input id="creatorApiBase" type="text" value="https://coderunner.cin.ufpe.br/api/v4" />
+            </div>
+            <div class="creator-field">
+              <label for="creatorProblemId">Problem ID (opcional, para atualizar)</label>
+              <input id="creatorProblemId" type="text" placeholder="ex.: soma-vetores" />
+            </div>
+            <div class="creator-field">
+              <label for="creatorApiUser">Usuario API</label>
+              <input id="creatorApiUser" type="text" />
+            </div>
+            <div class="creator-field">
+              <label for="creatorApiPassword">Senha API</label>
+              <input id="creatorApiPassword" type="password" />
+            </div>
+          </div>
+
+          <div class="creator-actions">
+            <button id="previewMarkdownBtn" type="button" class="badge dim">Atualizar preview</button>
+            <button id="downloadZipBtn" type="button" class="primary">Baixar ZIP</button>
+            <button id="sendToDomjudgeBtn" type="button" class="badge">Enviar para DOMjudge</button>
+          </div>
+
+          <div id="creatorFeedback" class="status"></div>
+          <article class="card preview-card">
+            <h4>Preview HTML</h4>
+            <div id="markdownPreview" class="markdown-preview"></div>
+          </article>
+        </article>
+      </section>
+    </main>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="creator.js"></script>
+  </body>
+</html>
