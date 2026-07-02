@@ -157,19 +157,53 @@ function finalSubmission(submissions) {
   return ordered[0] || null;
 }
 
-function decodeSourceContent(value) {
+function decodeSourceContent(value, { forceBase64 = false } = {}) {
   const text = String(value ?? "");
-  const candidate = text.trim();
-  const looksBase64 = candidate.length > 0 && candidate.length % 4 === 0 && /^[A-Za-z0-9+/=\r\n]+$/.test(candidate);
-  if (!looksBase64) return text;
+  const trimmed = text.trim();
+  if (!trimmed) return text;
+
+  let candidate = trimmed;
+  const dataUriMatch = candidate.match(/^data:[^,]*;base64,(.*)$/i);
+  if (dataUriMatch) {
+    candidate = dataUriMatch[1];
+    forceBase64 = true;
+  }
+
+  candidate = candidate.replace(/[\r\n\t\s]+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  if (!candidate) return text;
+
+  const mod = candidate.length % 4;
+  if (mod !== 0) candidate = candidate.padEnd(candidate.length + (4 - mod), "=");
+
+  const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(candidate);
+  if (!looksBase64 && !forceBase64) return text;
 
   try {
-    const decoded = atob(candidate);
-    if (/[^\x09\x0A\x0D\x20-\x7E\u00A0-\u00FF]/.test(decoded)) return text;
+    const binary = atob(candidate);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    let decoded;
+
+    try {
+      decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch (_utf8Error) {
+      decoded = binary;
+    }
+
+    if (!forceBase64 && /[^\x09\x0A\x0D\x20-\x7E\u00A0-\u00FF]/.test(decoded)) {
+      return text;
+    }
     return decoded;
   } catch (_error) {
     return text;
   }
+}
+
+function extractSourceValue(entry) {
+  const raw = entry?.source ?? entry?.content ?? entry?.data ?? entry?.code ?? entry?.text ?? "";
+  if (raw && typeof raw === "object") {
+    return raw.source ?? raw.content ?? raw.data ?? raw.code ?? raw.text ?? "";
+  }
+  return raw;
 }
 
 function parseSourcePayload(payload) {
@@ -183,7 +217,12 @@ function parseSourcePayload(payload) {
 
   return items.map((entry) => {
     const filename = String(entry.filename || entry.name || "source.txt");
-    const source = decodeSourceContent(entry.source ?? entry.content ?? "");
+    const forceBase64 =
+      entry?.base64 === true ||
+      entry?.is_base64 === true ||
+      String(entry?.encoding || "").toLowerCase() === "base64" ||
+      String(entry?.content_transfer_encoding || "").toLowerCase() === "base64";
+    const source = decodeSourceContent(extractSourceValue(entry), { forceBase64 });
     return { filename, source };
   });
 }
@@ -338,7 +377,7 @@ function buildSubmissionElement(contest, submission) {
       codeEl.textContent = "Carregando...";
       try {
         const text = await fetchSourceCode(contest, submission, file);
-        codeEl.textContent = text;
+        codeEl.textContent = decodeSourceContent(text);
         hljs.highlightElement(codeEl);
       } catch (error) {
         codeEl.textContent = `Erro ao carregar: ${error.message}`;
