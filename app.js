@@ -32,6 +32,7 @@ const els = {
   apiFields: document.getElementById("apiFields"),
   apiActions: document.getElementById("apiActions"),
   saveDatasetBtn: document.getElementById("saveDatasetBtn"),
+  exportCsvBtn: document.getElementById("exportCsvBtn"),
   dataSourceRadios: Array.from(document.querySelectorAll('input[name="dataSource"]')),
   reloadBtn: document.getElementById("reloadBtn"),
   status: document.getElementById("status"),
@@ -143,6 +144,12 @@ function getProblemLabel(problem) {
 function filterByStatus(submissions) {
   if (state.filterStatusIds.includes("all")) return submissions;
   return submissions.filter((submission) => state.filterStatusIds.includes(getSubmissionStatus(submission)));
+}
+
+function shouldIncludeByStatus(originalSubmissions, filteredSubmissions) {
+  if (state.filterStatusIds.includes("all")) return true;
+  if (!originalSubmissions.length) return state.filterStatusIds.includes("not_submitted");
+  return filteredSubmissions.length > 0;
 }
 
 function finalSubmission(submissions) {
@@ -357,7 +364,19 @@ function buildTeamCard(contest, team, problem, submissions) {
   `;
 
   const submissionsEl = card.querySelector(".submissions");
-  if (first) submissionsEl.appendChild(buildSubmissionElement(contest, first));
+  if (first) {
+    submissionsEl.appendChild(buildSubmissionElement(contest, first));
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "submission";
+    empty.innerHTML = `
+      <div class="submission-header">
+        <div><strong>Nao submetido</strong></div>
+        <div class="submission-meta"><span class="badge dim">sem envios</span></div>
+      </div>
+    `;
+    submissionsEl.appendChild(empty);
+  }
 
   if (ordered.length > 1) {
     const toggle = document.createElement("button");
@@ -415,8 +434,9 @@ function collectRows() {
         if (state.view === "contest" && !state.filterProblemIds.includes("all") && !state.filterProblemIds.includes(contestProblemKey(contestId, String(problem.id)))) return;
 
         const key = `${team.id}::${problem.id}`;
-        const submissions = filterByStatus(contest.submissionIndex[key] || []);
-        if (!submissions.length) return;
+        const originalSubmissions = contest.submissionIndex[key] || [];
+        const submissions = filterByStatus(originalSubmissions);
+        if (!shouldIncludeByStatus(originalSubmissions, submissions)) return;
         rows.push({ contest, team, problem, submissions });
       });
     });
@@ -459,18 +479,19 @@ function renderStudentView() {
   const cards = [];
   contest.problems.forEach((problem) => {
     const key = `${team.id}::${problem.id}`;
-    const submissions = filterByStatus(contest.submissionIndex[key] || []);
-    if (!submissions.length) return;
+    const originalSubmissions = contest.submissionIndex[key] || [];
+    const submissions = filterByStatus(originalSubmissions);
+    if (!shouldIncludeByStatus(originalSubmissions, submissions)) return;
     cards.push(buildTeamCard(contest, team, problem, submissions));
   });
 
-  setStatus(`${cards.length} questao(oes) com submissao para ${team.name || team.id}.`);
+  setStatus(`${cards.length} questao(oes) para ${team.name || team.id}.`);
   els.results.replaceChildren(...cards);
 }
 
 function renderContestView() {
   const rows = collectRows();
-  setStatus(`${rows.length} combinacao(oes) de questao/team com submissao.`);
+  setStatus(`${rows.length} combinacao(oes) de questao/team.`);
   els.results.replaceChildren(...rows.map((row) => buildTeamCard(row.contest, row.team, row.problem, row.submissions)));
 }
 
@@ -515,8 +536,7 @@ function renderSummaryView() {
 
   rows.forEach((row) => {
     const final = finalSubmission(row.submissions);
-    if (!final) return;
-    const accepted = isAccepted(final);
+    const accepted = final ? isAccepted(final) : false;
     const item = document.createElement("article");
     item.className = "summary-item" + (accepted ? " accepted" : "");
     item.innerHTML = `
@@ -524,7 +544,7 @@ function renderSummaryView() {
         <strong>${sanitize(row.team.name || row.team.id)}</strong>
         <small>${sanitize(formatContestLabel(row.contest))} · ${sanitize(getProblemLabel(row.problem))}</small>
       </div>
-      <span class="badge ${accepted ? "" : "dim"}">${accepted ? "accepted" : sanitize(final.judgement_label || final.status || "outro")}</span>
+      <span class="badge ${accepted ? "" : "dim"}">${accepted ? "accepted" : sanitize(final?.judgement_label || final?.status || "nao submetido")}</span>
     `;
     list.appendChild(item);
   });
@@ -549,14 +569,16 @@ function updateControlsVisibility() {
 }
 
 function updateSourceControlsVisibility() {
-    debugger
   const isApi = state.dataSource === "api";
   els.datasetFields.style.display = isApi ? 'none' : '';
-    els.apiFields.style.display = isApi ? '' : 'none';
+  els.apiFields.style.display = isApi ? '' : 'none';
   if (els.apiActions) {
-      els.apiActions.style.display = !(isApi && state.loadedSource === "api") ? 'none' : '';
+    els.apiActions.style.display = !(isApi && state.loadedSource === "api") ? 'none' : '';
   }
   els.reloadBtn.textContent = isApi ? "Carregar da API" : "Carregar dataset";
+  if (els.exportCsvBtn) {
+    els.exportCsvBtn.disabled = !state.contests.length;
+  }
   if (els.saveDatasetBtn) {
     const canSave = isApi && state.loadedSource === "api" && state.contests.length > 0;
     els.saveDatasetBtn.disabled = !canSave;
@@ -589,6 +611,76 @@ function triggerBlobDownload(blob, filename) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function buildContestCsv(contest) {
+  const header = ["team", ...contest.problems.map((problem) => getProblemLabel(problem))];
+  const lines = [header.map(csvEscape).join(",")];
+
+  sortedTeams(contest).forEach((team) => {
+    const row = [team.name || team.id];
+    contest.problems.forEach((problem) => {
+      const key = `${team.id}::${problem.id}`;
+      const submissions = contest.submissionIndex[key] || [];
+      const final = finalSubmission(submissions);
+      const value = final ? (final.judgement_label || final.status || "submetido") : "nao submetido";
+      row.push(value);
+    });
+    lines.push(row.map(csvEscape).join(","));
+  });
+
+  return `${lines.join("\n")}\n`;
+}
+
+async function exportCsvByContest() {
+  const selectedContests = getSelectedContests();
+  if (!selectedContests.length) {
+    setStatus("Selecione ao menos um contest para exportar CSV.");
+    return;
+  }
+
+  try {
+    if (els.exportCsvBtn) els.exportCsvBtn.disabled = true;
+    setStatus("Gerando CSV(s) por contest...");
+
+    if (selectedContests.length === 1) {
+      const contest = selectedContests[0];
+      const csv = buildContestCsv(contest);
+      const filename = `${contestFolderName(contest)}.csv`;
+      triggerBlobDownload(new Blob([csv], { type: "text/csv;charset=utf-8" }), filename);
+      setStatus("CSV exportado com sucesso.");
+      return;
+    }
+
+    if (window.JSZip) {
+      const zip = new window.JSZip();
+      selectedContests.forEach((contest) => {
+        zip.file(`${contestFolderName(contest)}.csv`, buildContestCsv(contest));
+      });
+      const blob = await zip.generateAsync({ type: "blob" });
+      triggerBlobDownload(blob, "contests-csv.zip");
+      setStatus(`${selectedContests.length} CSV(s) exportados em ZIP.`);
+      return;
+    }
+
+    selectedContests.forEach((contest) => {
+      const csv = buildContestCsv(contest);
+      triggerBlobDownload(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${contestFolderName(contest)}.csv`);
+    });
+    setStatus(`${selectedContests.length} CSV(s) exportados.`);
+  } catch (error) {
+    setStatus(`Erro ao exportar CSV: ${error.message}`);
+  } finally {
+    if (els.exportCsvBtn) {
+      els.exportCsvBtn.disabled = !state.contests.length;
+    }
+  }
 }
 
 async function saveDatasetZip() {
@@ -761,7 +853,11 @@ function populateStatusFilter() {
     });
   });
 
-  const statusOptions = [{ value: "all", label: "Todos" }, ...Array.from(statuses.entries()).map(([value, label]) => ({ value, label }))];
+  const statusOptions = [
+    { value: "all", label: "Todos" },
+    { value: "not_submitted", label: "Nao submetido" },
+    ...Array.from(statuses.entries()).map(([value, label]) => ({ value, label })),
+  ];
   populateSelect(els.statusSelect, statusOptions, "Filtro status", { multiple: true });
   const available = new Set(statusOptions.map((entry) => entry.value));
   state.filterStatusIds = state.filterStatusIds.filter((value) => available.has(value));
@@ -989,6 +1085,10 @@ if (els.pickDatasetFolderBtn && els.datasetFolderInput) {
 
 if (els.saveDatasetBtn) {
   els.saveDatasetBtn.addEventListener("click", saveDatasetZip);
+}
+
+if (els.exportCsvBtn) {
+  els.exportCsvBtn.addEventListener("click", exportCsvByContest);
 }
 
 els.contestSelect.addEventListener("change", (event) => {
