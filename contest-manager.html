@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DOMjudge Contest Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <div class="screen-links">
+            <a href="index.html" class="screen-link">Visualizacao</a>
+            <a href="creator.html" class="screen-link">Criacao</a>
+            <a href="contest-manager.html" class="screen-link active">Gerenciar contest</a>
+          </div>
+          <p class="eyebrow">DOMjudge manager</p>
+          <h1>Gerenciamento de contest</h1>
+          <p class="subtitle">
+            Carregue os contests pela API e altere horario de inicio, horario de fim e status
+            habilitado/desabilitado.
+          </p>
+        </div>
+        <div class="dataset-card">
+          <p class="card-title">Conexao com API</p>
+
+          <label for="managerApiBase">API base</label>
+          <input id="managerApiBase" type="text" value="https://coderunner.cin.ufpe.br/api/v4" />
+
+          <label for="managerApiUser">Usuario API</label>
+          <input id="managerApiUser" type="text" />
+
+          <label for="managerApiPassword">Senha API</label>
+          <input id="managerApiPassword" type="password" />
+
+          <label for="managerExtraContestIds">IDs extras de contest (opcional)</label>
+          <input id="managerExtraContestIds" type="text" placeholder="Ex.: 12,14,15,16,17" />
+
+          <div class="row">
+            <button id="managerLoadBtn" class="primary" type="button">Carregar contests</button>
+          </div>
+          <p class="hint">Use credenciais com permissao para atualizar contests.</p>
+        </div>
+      </header>
+
+      <section class="manager-toolbar card">
+        <div class="manager-filters">
+          <div class="creator-field">
+            <label for="managerFilterText">Filtro por nome/ID</label>
+            <input id="managerFilterText" type="text" placeholder="Digite parte do nome ou ID" />
+          </div>
+          <div class="creator-field">
+            <label for="managerFilterEnabled">Status</label>
+            <select id="managerFilterEnabled">
+              <option value="all">Todos</option>
+              <option value="enabled">Habilitados</option>
+              <option value="disabled">Desabilitados</option>
+            </select>
+          </div>
+          <div class="creator-field">
+            <label for="managerFilterChanged">Alteracao</label>
+            <select id="managerFilterChanged">
+              <option value="all">Todos</option>
+              <option value="changed">Apenas alterados</option>
+              <option value="unchanged">Apenas nao alterados</option>
+            </select>
+          </div>
+        </div>
+        <div class="manager-apply-bar">
+          <div class="creator-field">
+            <label for="managerBulkStart">Aplicar inicio</label>
+            <input id="managerBulkStart" type="datetime-local" />
+          </div>
+          <div class="creator-field">
+            <label for="managerBulkEnd">Aplicar fim</label>
+            <input id="managerBulkEnd" type="datetime-local" />
+          </div>
+          <div class="creator-field">
+            <label for="managerBulkEnabled">Aplicar status</label>
+            <select id="managerBulkEnabled">
+              <option value="keep" selected>Manter atual</option>
+              <option value="enable">Habilitar</option>
+              <option value="disable">Desabilitar</option>
+            </select>
+          </div>
+          <div class="creator-field">
+            <label for="managerBulkScope">Escopo</label>
+            <select id="managerBulkScope">
+              <option value="page" selected>Pagina atual</option>
+              <option value="filtered">Todos filtrados</option>
+            </select>
+          </div>
+          <div class="manager-apply-action">
+            <button id="managerApplyBulkBtn" type="button" class="badge">Aplicar em massa</button>
+          </div>
+          <p id="managerBulkHint" class="hint">Campos vazios de data nao alteram o valor atual.</p>
+        </div>
+        <div class="manager-bulk-actions">
+          <button id="managerSaveChangedBtn" class="primary" type="button" disabled>Salvar alterados</button>
+          <p id="managerChangedHint" class="hint">Nenhuma alteracao pendente.</p>
+        </div>
+        <div class="manager-pagination-controls">
+          <div class="creator-field manager-page-size">
+            <label for="managerPageSize">Linhas por pagina</label>
+            <select id="managerPageSize">
+              <option value="10">10</option>
+              <option value="15" selected>15</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+          <div class="manager-page-nav">
+            <button id="managerPrevPageBtn" type="button" class="badge dim">Anterior</button>
+            <span id="managerPageLabel" class="hint">Pagina 1 de 1</span>
+            <button id="managerNextPageBtn" type="button" class="badge dim">Proxima</button>
+          </div>
+          <p id="managerPageStats" class="hint">Mostrando 0 de 0</p>
+        </div>
+      </section>
+
+      <section id="managerStatus" class="status"></section>
+      <section id="contestManagerList" class="results"></section>
+    </main>
+
+    <script src="contest-manager.js"></script>
+  </body>
+</html>
