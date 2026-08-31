@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DOMjudge User Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid"></div>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <div class="screen-links">
+            <a href="index.html" class="screen-link">Visualizacao</a>
+            <a href="creator.html" class="screen-link">Criacao</a>
+            <a href="contest-manager.html" class="screen-link">Gerenciar contest</a>
+            <a href="users.html" class="screen-link active">Gerenciar usuarios</a>
+          </div>
+          <p class="eyebrow">DOMjudge user manager</p>
+          <h1>Gerenciamento de usuarios</h1>
+          <p class="subtitle">
+            Listagem, criação individual ou em lote, filtros avançados por categoria e labels, e edição em massa.
+          </p>
+        </div>
+        <div class="dataset-card">
+          <p class="card-title">Conexao com API / Dados</p>
+
+          <label for="usersApiBase">API base</label>
+          <input id="usersApiBase" type="text" value="https://coderunner.cin.ufpe.br/api/v4" />
+
+          <label for="usersApiUser">Usuario API</label>
+          <input id="usersApiUser" type="text" />
+
+          <label for="usersApiPassword">Senha API</label>
+          <input id="usersApiPassword" type="password" />
+
+          <div class="row">
+            <button id="loadUsersBtn" class="primary" type="button">Carregar usuarios</button>
+            <button id="loadDemoUsersBtn" class="badge dim" type="button">Carregar dados exemplo</button>
+          </div>
+          <p class="hint">Conecte a API do DOMjudge ou carregue dados de demonstracao para testes.</p>
+        </div>
+      </header>
+
+      <section class="manager-toolbar card">
+        <div class="test-item-head">
+          <h3>Filtros e Ações</h3>
+          <button id="openCreateModalBtn" class="primary" type="button">+ Novo(s) Usuario(s)</button>
+        </div>
+
+        <!-- Filtros -->
+        <div class="manager-filters">
+          <div class="creator-field">
+            <label for="usersFilterText">Buscar por nome / username / email</label>
+            <input id="usersFilterText" type="text" placeholder="Digite para filtrar..." />
+          </div>
+          <div class="creator-field">
+            <label for="usersFilterCategory">Filtrar por Categoria</label>
+            <select id="usersFilterCategory">
+              <option value="all">Todas as categorias</option>
+            </select>
+          </div>
+          <div class="creator-field">
+            <label for="usersFilterLabel">Filtrar por Labels</label>
+            <select id="usersFilterLabel">
+              <option value="all">Todas as labels</option>
+            </select>
+          </div>
+          <div class="creator-field">
+            <label for="usersFilterRole">Filtrar por Role</label>
+            <select id="usersFilterRole">
+              <option value="all">Todas as roles</option>
+            </select>
+          </div>
+          <div class="creator-field">
+            <label for="usersFilterEnabled">Status</label>
+            <select id="usersFilterEnabled">
+              <option value="all">Todos</option>
+              <option value="enabled">Ativos / Habilitados</option>
+              <option value="disabled">Inativos / Desabilitados</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Alterações em Lote -->
+        <div class="manager-apply-bar">
+          <div class="creator-field">
+            <label for="bulkScope">Escopo da alteração</label>
+            <select id="bulkScope">
+              <option value="selected" selected>Selecionados (0)</option>
+              <option value="page">Pagina atual</option>
+              <option value="filtered">Todos os filtrados</option>
+            </select>
+          </div>
+          <div class="creator-field">
+            <label for="bulkCategory">Nova Categoria</label>
+            <input id="bulkCategory" type="text" placeholder="Manter atual (ou digite nova)" list="categoryDataList" />
+            <datalist id="categoryDataList"></datalist>
+          </div>
+          <div class="creator-field">
+            <label for="bulkLabels">Labels (separadas por virgula)</label>
+            <input id="bulkLabels" type="text" placeholder="ex: turma-a,2026-1" />
+          </div>
+          <div class="creator-field">
+            <label for="bulkLabelsMode">Modo de Labels</label>
+            <select id="bulkLabelsMode">
+              <option value="add" selected>Adicionar as existentes</option>
+              <option value="replace">Substituir todas</option>
+              <option value="remove">Remover selecionadas</option>
+            </select>
+          </div>
+          <div class="creator-field">
+            <label for="bulkEnabled">Status</label>
+            <select id="bulkEnabled">
+              <option value="keep" selected>Manter atual</option>
+              <option value="enable">Habilitar</option>
+              <option value="disable">Desabilitar</option>
+            </select>
+          </div>
+          <div class="manager-apply-action">
+            <button id="applyBulkBtn" type="button" class="badge">Aplicar em lote</button>
+          </div>
+        </div>
+
+        <!-- Botões de Salvar e Exportar -->
+        <div class="manager-bulk-actions">
+          <button id="saveChangesBtn" class="primary" type="button" disabled>Salvar alterados</button>
+          <button id="exportUsersCsvBtn" class="badge dim" type="button">Exportar CSV</button>
+          <span id="changedHint" class="hint">Nenhuma alteração pendente.</span>
+        </div>
+
+        <!-- Paginação -->
+        <div class="manager-pagination-controls">
+          <div class="creator-field manager-page-size">
+            <label for="usersPageSize">Linhas por pagina</label>
+            <select id="usersPageSize">
+              <option value="10">10</option>
+              <option value="15" selected>15</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+          <div class="manager-page-nav">
+            <button id="prevPageBtn" type="button" class="badge dim">Anterior</button>
+            <span id="pageLabel" class="hint">Pagina 1 de 1</span>
+            <button id="nextPageBtn" type="button" class="badge dim">Proxima</button>
+          </div>
+          <p id="pageStats" class="hint">Mostrando 0 de 0</p>
+        </div>
+      </section>
+
+      <section id="usersStatus" class="status"></section>
+
+      <!-- Tabela de Usuários -->
+      <section class="card manager-table-card">
+        <div class="manager-table-wrap">
+          <table class="manager-table">
+            <thead>
+              <tr>
+                <th class="checkbox-col">
+                  <input id="selectAllCheckbox" type="checkbox" title="Selecionar todos da pagina" />
+                </th>
+                <th><button type="button" class="manager-sort" data-sort="username">Username ↕</button></th>
+                <th><button type="button" class="manager-sort" data-sort="name">Nome ↕</button></th>
+                <th>Email</th>
+                <th><button type="button" class="manager-sort" data-sort="category">Categoria ↕</button></th>
+                <th>Labels</th>
+                <th><button type="button" class="manager-sort" data-sort="roles">Funções (Roles) ↕</button></th>
+                <th><button type="button" class="manager-sort" data-sort="enabled">Status ↕</button></th>
+                <th style="text-align: right;">Açoes</th>
+              </tr>
+            </thead>
+            <tbody id="usersTableBody">
+              <tr>
+                <td colspan="9" class="manager-empty">Nenhum usuario carregado. Clique em "Carregar usuarios" ou "Carregar dados exemplo".</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modal para Criar Usuário(s) -->
+    <div id="createModal" class="modal-overlay" hidden>
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Criar Novo(s) Usuario(s)</h3>
+          <button type="button" class="close-btn" id="closeCreateModalBtn">&times;</button>
+        </div>
+
+        <div class="tab-nav">
+          <button type="button" id="tabSingleBtn" class="tab-btn active">Único Usuario</button>
+          <button type="button" id="tabBatchBtn" class="tab-btn">Criar em Lote (Múltiplos)</button>
+        </div>
+
+        <!-- Form Criar Único Usuário -->
+        <form id="createSingleForm" class="creator-grid">
+          <div class="creator-field">
+            <label for="createUsername">Username *</label>
+            <input id="createUsername" type="text" required placeholder="ex: joaosilva" />
+          </div>
+          <div class="creator-field">
+            <label for="createName">Nome completo *</label>
+            <input id="createName" type="text" required placeholder="ex: João Silva" />
+          </div>
+          <div class="creator-field">
+            <label for="createEmail">Email</label>
+            <input id="createEmail" type="email" placeholder="ex: joao@exemplo.com" />
+          </div>
+          <div class="creator-field">
+            <label for="createPassword">Senha *</label>
+            <input id="createPassword" type="password" required placeholder="Senha inicial" />
+          </div>
+          <div class="creator-field full">
+            <label class="creator-checkbox">
+              <input id="createHasTeam" type="checkbox" checked /> Criar Team no DOMjudge para este usuario (usando o mesmo nome do usuario)
+            </label>
+          </div>
+          <div class="creator-field" id="createCategoryField">
+            <label for="createCategory">Categoria do Team</label>
+            <input id="createCategory" type="text" placeholder="ex: Estudantes" list="categoryDataList" />
+          </div>
+          <div class="creator-field" id="createLabelsField">
+            <label for="createLabels">Labels do Team (separadas por virgula)</label>
+            <input id="createLabels" type="text" placeholder="ex: turma-a, 2026-1" />
+          </div>
+          <div class="creator-field full">
+            <label>Funçoes (Roles)</label>
+            <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-top: 4px;">
+              <label class="creator-checkbox"><input type="checkbox" name="createRoles" value="team" checked /> Team</label>
+              <label class="creator-checkbox"><input type="checkbox" name="createRoles" value="jury" /> Jury</label>
+              <label class="creator-checkbox"><input type="checkbox" name="createRoles" value="admin" /> Admin</label>
+            </div>
+          </div>
+          <div class="creator-field full">
+            <label class="creator-checkbox">
+              <input id="createEnabled" type="checkbox" checked /> Habilitado / Ativo
+            </label>
+          </div>
+          <div class="creator-actions full">
+            <button type="submit" class="primary">Criar Usuario</button>
+            <button type="button" id="cancelCreateSingleBtn" class="badge dim">Cancelar</button>
+          </div>
+        </form>
+
+        <!-- Form Criar em Lote -->
+        <div id="createBatchContainer" hidden>
+          <div class="batch-format-hint">
+            <strong>Formato por linha (CSV/TSV):</strong><br />
+            <code>username, nome, email, senha, categoria, labels</code><br />
+            <small>Exemplo:<br />
+              aluno01, Ana Souza, ana@email.com, 123456, Turma A, vip,monitor<br />
+              aluno02, Carlos Lima, carlos@email.com, 123456, Turma A, monitor
+            </small>
+          </div>
+
+          <div class="creator-grid">
+            <div class="creator-field full">
+              <label class="creator-checkbox">
+                <input id="batchHasTeam" type="checkbox" checked /> Criar Team para cada usuario do lote (usando o mesmo nome do usuario)
+              </label>
+            </div>
+            <div class="creator-field">
+              <label for="batchDefaultCategory">Categoria padrão (se omitida)</label>
+              <input id="batchDefaultCategory" type="text" placeholder="ex: Estudantes" />
+            </div>
+            <div class="creator-field">
+              <label for="batchDefaultLabels">Labels padrão (virgula)</label>
+              <input id="batchDefaultLabels" type="text" placeholder="ex: 2026-1" />
+            </div>
+            <div class="creator-field full">
+              <label for="batchInputText">Lista de usuarios (uma pessoa por linha)</label>
+              <textarea id="batchInputText" rows="8" placeholder="aluno01, Ana Souza, ana@email.com, senha123, Turma A, vip&#10;aluno02, Bruno Santos, carlos@email.com, senha123, Turma B"></textarea>
+            </div>
+          </div>
+
+          <div class="creator-actions" style="margin-top: 14px;">
+            <button id="processBatchBtn" type="button" class="primary">Processar e Adicionar Usuarios</button>
+            <button type="button" id="cancelCreateBatchBtn" class="badge dim">Cancelar</button>
+          </div>
+          <div id="batchFeedback" class="hint" style="margin-top: 8px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal para Editar Usuário Único -->
+    <div id="editModal" class="modal-overlay" hidden>
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Editar Usuario: <span id="editUserTitle"></span></h3>
+          <button type="button" class="close-btn" id="closeEditModalBtn">&times;</button>
+        </div>
+
+        <form id="editSingleForm" class="creator-grid">
+          <input id="editUserId" type="hidden" />
+          <div class="creator-field">
+            <label for="editUsername">Username</label>
+            <input id="editUsername" type="text" required />
+          </div>
+          <div class="creator-field">
+            <label for="editName">Nome completo</label>
+            <input id="editName" type="text" required />
+          </div>
+          <div class="creator-field">
+            <label for="editEmail">Email</label>
+            <input id="editEmail" type="email" />
+          </div>
+          <div class="creator-field">
+            <label for="editPassword">Nova senha (deixe em branco se nao for alterar)</label>
+            <input id="editPassword" type="password" placeholder="Preencha apenas para alterar" />
+          </div>
+          <div class="creator-field full">
+            <label class="creator-checkbox">
+              <input id="editHasTeam" type="checkbox" /> Possui Team no DOMjudge (usando o mesmo nome do usuario)
+            </label>
+          </div>
+          <div class="creator-field" id="editCategoryField">
+            <label for="editCategory">Categoria do Team</label>
+            <input id="editCategory" type="text" list="categoryDataList" />
+          </div>
+          <div class="creator-field" id="editLabelsField">
+            <label for="editLabels">Labels do Team (separadas por virgula)</label>
+            <input id="editLabels" type="text" placeholder="ex: turma-a, 2026-1" />
+          </div>
+          <div class="creator-field full">
+            <label>Funçoes (Roles)</label>
+            <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-top: 4px;">
+              <label class="creator-checkbox"><input type="checkbox" name="editRoles" value="team" /> Team</label>
+              <label class="creator-checkbox"><input type="checkbox" name="editRoles" value="jury" /> Jury</label>
+              <label class="creator-checkbox"><input type="checkbox" name="editRoles" value="admin" /> Admin</label>
+            </div>
+          </div>
+          <div class="creator-field full">
+            <label class="creator-checkbox">
+              <input id="editEnabled" type="checkbox" /> Habilitado / Ativo
+            </label>
+          </div>
+          <div class="creator-actions full">
+            <button type="submit" class="primary">Salvar Alteraçoes</button>
+            <button type="button" id="cancelEditModalBtn" class="badge dim">Cancelar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="users.js"></script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^node -c app\\.js creator\\.js contest-manager\\.js users\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^node -e \"\nconst fs = require\\('fs'\\);\nconst path = require\\('path'\\);\nconst jsdom = require\\('domain'\\);\n\n\\['app\\.js', 'creator\\.js', 'contest-manager\\.js', 'users\\.js'\\]\\.forEach\\(file => \\{\n  try \\{\n    const code = fs\\.readFileSync\\(file, 'utf8'\\);\n    new Function\\(code\\);\n    console\\.log\\(file, 'JS Syntax OK'\\);\n  \\} catch\\(e\\) \\{\n    console\\.error\\(file, 'JS Syntax ERROR:', e\\);\n  \\}\n\\}\\);\n\n\\['index\\.html', 'creator\\.html', 'contest-manager\\.html', 'users\\.html'\\]\\.forEach\\(file => \\{\n  const html = fs\\.readFileSync\\(file, 'utf8'\\);\n  const scripts = html\\.match\\(/<script\\[\\\\s\\\\S\\]\\*\\?>\\[\\\\s\\\\S\\]\\*\\?<\\\\/script>/gi\\) \\|\\| \\[\\];\n  scripts\\.forEach\\(\\(script, idx\\) => \\{\n    const inline = script\\.replace\\(/<script\\[\\\\s\\\\S\\]\\*\\?>/i, ''\\)\\.replace\\(/<\\\\/script>/i, ''\\)\\.trim\\(\\);\n    if \\(inline && !script\\.includes\\('src='\\)\\) \\{\n      try \\{\n        new Function\\(inline\\);\n        console\\.log\\(file, 'inline script', idx, 'OK'\\);\n      \\} catch\\(e\\) \\{\n        console\\.error\\(file, 'inline script', idx, 'ERROR:', e\\);\n      \\}\n    \\}\n  \\}\\);\n\\}\\);\n\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
