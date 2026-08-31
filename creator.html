@@ -87,8 +87,16 @@
             </div>
           </div>
 
+          <div class="creator-checkbox-row">
+            <label class="creator-checkbox">
+              <input id="includePdfCheckbox" type="checkbox" checked />
+              Anexar PDF no pacote (problem.pdf)
+            </label>
+          </div>
+
           <div class="creator-actions">
             <button id="previewMarkdownBtn" type="button" class="badge dim">Atualizar preview</button>
+            <button id="downloadPdfBtn" type="button" class="badge dim">Baixar PDF</button>
             <button id="downloadZipBtn" type="button" class="primary">Baixar ZIP</button>
             <button id="sendToDomjudgeBtn" type="button" class="badge">Enviar para DOMjudge</button>
           </div>
@@ -111,6 +119,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="creator.js"></script>
   </body>
 </html>

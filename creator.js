@@ -11,8 +11,10 @@ const els = {
   addSampleTest: document.getElementById("addSampleTest"),
   addSecretTest: document.getElementById("addSecretTest"),
   previewMarkdownBtn: document.getElementById("previewMarkdownBtn"),
+  downloadPdfBtn: document.getElementById("downloadPdfBtn"),
   downloadZipBtn: document.getElementById("downloadZipBtn"),
   sendToDomjudgeBtn: document.getElementById("sendToDomjudgeBtn"),
+  includePdfCheckbox: document.getElementById("includePdfCheckbox"),
   creatorFeedback: document.getElementById("creatorFeedback"),
   creatorApiBase: document.getElementById("creatorApiBase"),
   creatorProblemId: document.getElementById("creatorProblemId"),
@@ -101,6 +103,108 @@ function buildProblemHtml(markdownText) {
     "</body>",
     "</html>",
   ].join("\n");
+}
+
+async function generateProblemPdfBlob(markdownText) {
+  if (!window.html2pdf) {
+    throw new Error("html2pdf.js nao esta disponivel no navegador.");
+  }
+
+  const titleName = (els.creatorName?.value || "").trim();
+  const bodyHtml = parseMdWithMath(markdownText);
+
+  const container = document.createElement("div");
+  container.className = "pdf-export-container";
+  container.style.position = "fixed";
+  container.style.left = "-9999px";
+  container.style.top = "0";
+  container.style.width = "750px";
+  container.style.background = "#ffffff";
+  container.style.color = "#111111";
+  container.style.fontFamily = "Arial, Helvetica, sans-serif";
+  container.style.fontSize = "14px";
+  container.style.lineHeight = "1.6";
+  container.style.padding = "24px";
+  container.style.boxSizing = "border-box";
+
+  let headerHtml = "";
+  if (titleName) {
+    headerHtml = `<h1 style="font-size: 22px; margin-top: 0; margin-bottom: 16px; border-bottom: 2px solid #333; padding-bottom: 8px;">${sanitize(titleName)}</h1>`;
+  }
+
+  container.innerHTML = `
+    <style>
+      .pdf-export-container pre {
+        background: #f6f8fa;
+        padding: 12px;
+        border-radius: 6px;
+        border: 1px solid #e1e4e8;
+        overflow-x: auto;
+        font-family: monospace;
+        font-size: 13px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .pdf-export-container code {
+        font-family: monospace;
+        background: #f0f0f0;
+        padding: 2px 4px;
+        border-radius: 4px;
+        font-size: 13px;
+      }
+      .pdf-export-container pre code {
+        background: none;
+        padding: 0;
+      }
+      .pdf-export-container table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-bottom: 16px;
+      }
+      .pdf-export-container th, .pdf-export-container td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+      }
+      .pdf-export-container th {
+        background-color: #f2f2f2;
+      }
+      .pdf-export-container img {
+        max-width: 100%;
+        height: auto;
+      }
+      .pdf-export-container h1, .pdf-export-container h2, .pdf-export-container h3 {
+        color: #111;
+        margin-top: 16px;
+        margin-bottom: 8px;
+      }
+    </style>
+    <div>
+      ${headerHtml}
+      ${bodyHtml}
+    </div>
+  `;
+
+  document.body.appendChild(container);
+  highlightCodeBlocks(container);
+
+  const opt = {
+    margin: [15, 15, 15, 15],
+    filename: "problem.pdf",
+    image: { type: "jpeg", quality: 0.98 },
+    html2canvas: { scale: 2, useCORS: true, logging: false },
+    jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
+  };
+
+  try {
+    const worker = window.html2pdf().set(opt).from(container);
+    const pdfBlob = await worker.output("blob");
+    return pdfBlob;
+  } finally {
+    if (document.body.contains(container)) {
+      document.body.removeChild(container);
+    }
+  }
 }
 
 function collectTestsFromForm() {
@@ -325,6 +429,20 @@ async function buildProblemZipBlob() {
   zip.file("problem.md", markdown.endsWith("\n") ? markdown : `${markdown}\n`);
   zip.file("problem.html", buildProblemHtml(markdown));
 
+  const shouldIncludePdf = els.includePdfCheckbox ? els.includePdfCheckbox.checked : true;
+  if (shouldIncludePdf && markdown.trim()) {
+    try {
+      creatorMessage("Gerando PDF para o pacote...");
+      const pdfBlob = await generateProblemPdfBlob(markdown);
+      if (pdfBlob) {
+        zip.file("problem.pdf", pdfBlob);
+      }
+    } catch (pdfErr) {
+      console.warn("Erro ao gerar PDF para o ZIP:", pdfErr);
+      creatorMessage(`Aviso: Nao foi possivel gerar PDF (${pdfErr.message}). Continuando geracao do ZIP...`);
+    }
+  }
+
   const sampleFolder = zip.folder("data")?.folder("sample");
   const secretFolder = zip.folder("data")?.folder("secret");
   if (!sampleFolder || !secretFolder) {
@@ -370,6 +488,22 @@ async function downloadProblemZip() {
     creatorMessage("ZIP gerado com sucesso.");
   } catch (error) {
     creatorMessage(`Erro: ${error.message}`);
+  }
+}
+
+async function downloadProblemPdf() {
+  try {
+    const markdown = els.creatorMarkdown?.value || "";
+    if (!markdown.trim()) {
+      throw new Error("Escreva o enunciado em Markdown antes de gerar o PDF.");
+    }
+    creatorMessage("Gerando PDF...");
+    const pdfBlob = await generateProblemPdfBlob(markdown);
+    const shortname = (els.creatorShortname?.value || "").trim() || slugify(els.creatorName?.value || "problema");
+    downloadBlob(pdfBlob, `${shortname}.pdf`);
+    creatorMessage("PDF gerado com sucesso.");
+  } catch (error) {
+    creatorMessage(`Erro ao gerar PDF: ${error.message}`);
   }
 }
 
@@ -448,6 +582,10 @@ if (els.addSecretTest) {
 
 if (els.previewMarkdownBtn) {
   els.previewMarkdownBtn.addEventListener("click", renderMarkdownPreview);
+}
+
+if (els.downloadPdfBtn) {
+  els.downloadPdfBtn.addEventListener("click", downloadProblemPdf);
 }
 
 if (els.downloadZipBtn) {
