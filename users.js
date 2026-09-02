@@ -8,6 +8,7 @@ const UsersModule = (() => {
     teamsMap: new Map(),
     categoriesMap: new Map(),
     originalUsersMap: new Map(),
+    conflictsMap: new Map(),
     selectedUserIds: new Set(),
     filterText: "",
     filterCategory: "all",
@@ -162,6 +163,127 @@ const UsersModule = (() => {
     } catch (e) {}
   }
 
+  // --------------------------------------------------------------------------
+  // DETECÇÃO DE CONFLITOS DE USERNAME (DUPLICADOS E SIMILARES)
+  // --------------------------------------------------------------------------
+  function normalizeUsername(str) {
+    return String(str || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
+  function levenshtein(a, b) {
+    const m = a.length;
+    const n = b.length;
+    if (m === 0) return n;
+    if (n === 0) return m;
+
+    const row = new Array(n + 1);
+    for (let j = 0; j <= n; j++) row[j] = j;
+
+    for (let i = 1; i <= m; i++) {
+      let prevDiag = row[0];
+      row[0] = i;
+      for (let j = 1; j <= n; j++) {
+        const temp = row[j];
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prevDiag + cost);
+        prevDiag = temp;
+      }
+    }
+    return row[n];
+  }
+
+  function checkUsernameSimilarity(u1, u2) {
+    const raw1 = String(u1 || "").trim();
+    const raw2 = String(u2 || "").trim();
+    if (!raw1 || !raw2) return null;
+
+    // 1. Exatamente idênticos (case-insensitive)
+    if (raw1.toLowerCase() === raw2.toLowerCase()) {
+      return { type: "duplicate", reason: "Username idêntico" };
+    }
+
+    const norm1 = normalizeUsername(raw1);
+    const norm2 = normalizeUsername(raw2);
+
+    // 2. Idênticos após remoção de acentos
+    if (norm1 === norm2) {
+      return { type: "case_accent", reason: "Username duplicado (variação de acentos/maiúsculas)" };
+    }
+
+    // 3. Similaridade removendo separadores (. _ - espaço)
+    const clean1 = norm1.replace(/[\s._-]+/g, "");
+    const clean2 = norm2.replace(/[\s._-]+/g, "");
+
+    if (clean1 === clean2) {
+      return { type: "separator", reason: "Username similar (diferença apenas em pontos ou traços)" };
+    }
+
+    // Proteger sequências numéricas intencionais (ex: aluno01 e aluno02, team1 e team2)
+    const matchSeq1 = clean1.match(/^([a-z_-]+)(\d+)$/);
+    const matchSeq2 = clean2.match(/^([a-z_-]+)(\d+)$/);
+    if (matchSeq1 && matchSeq2 && matchSeq1[1] === matchSeq2[1]) {
+      if (matchSeq1[2] !== matchSeq2[2]) {
+        return null; // Sequência numerada intencional permitida
+      }
+    }
+
+    // 4. Quase idênticos por distância de edição (1 caractere em nomes com 5+ letras, ou 2 caracteres em nomes com 8+ letras)
+    if (clean1.length >= 5 && clean2.length >= 5) {
+      const dist = levenshtein(clean1, clean2);
+      if (dist === 1) {
+        return { type: "typo", reason: "Username quase idêntico (diferença de 1 caractere)" };
+      }
+      if (clean1.length >= 8 && clean2.length >= 8 && dist === 2) {
+        return { type: "similar", reason: "Username altamente similar" };
+      }
+    }
+
+    return null;
+  }
+
+  function computeUsernameConflicts() {
+    const conflicts = new Map();
+    const n = state.users.length;
+
+    for (let i = 0; i < n; i++) {
+      const u1 = state.users[i];
+      const name1 = (u1.username || "").trim();
+      if (!name1) continue;
+
+      for (let j = i + 1; j < n; j++) {
+        const u2 = state.users[j];
+        const name2 = (u2.username || "").trim();
+        if (!name2) continue;
+
+        const conflict = checkUsernameSimilarity(name1, name2);
+        if (conflict) {
+          if (!conflicts.has(u1.id)) conflicts.set(u1.id, []);
+          conflicts.get(u1.id).push({
+            otherId: u2.id,
+            otherUsername: name2,
+            type: conflict.type,
+            reason: conflict.reason,
+          });
+
+          if (!conflicts.has(u2.id)) conflicts.set(u2.id, []);
+          conflicts.get(u2.id).push({
+            otherId: u1.id,
+            otherUsername: name1,
+            type: conflict.type,
+            reason: conflict.reason,
+          });
+        }
+      }
+    }
+
+    state.conflictsMap = conflicts;
+    return conflicts;
+  }
+
   function isUserChanged(user) {
     const orig = state.originalUsersMap.get(user.id);
     if (!orig) return true; // Novo usuário não salvo
@@ -185,6 +307,8 @@ const UsersModule = (() => {
   }
 
   function updateKpis() {
+    computeUsernameConflicts();
+    const hasConflicts = state.conflictsMap && state.conflictsMap.size > 0;
     const total = state.users.length;
     const active = state.users.filter((u) => Boolean(u.enabled)).length;
     const categories = new Set(
@@ -198,12 +322,27 @@ const UsersModule = (() => {
     if (els.kpiCategories) els.kpiCategories.textContent = categories;
     if (els.kpiTeams) els.kpiTeams.textContent = teams;
 
-    if (els.saveChangesBtn) els.saveChangesBtn.disabled = changed === 0;
+    // Se houver conflitos de similaridade/duplicidade, NÃO habilitar o botão de salvar
+    if (els.saveChangesBtn) {
+      els.saveChangesBtn.disabled = changed === 0 || hasConflicts;
+      if (hasConflicts) {
+        els.saveChangesBtn.title = "Não é possível salvar: existem usuários com username duplicado ou similar em conflito.";
+      } else {
+        els.saveChangesBtn.title = changed > 0 ? "Salvar alterações no DOMjudge" : "Nenhuma alteração pendente";
+      }
+    }
+
     if (els.changedHint) {
-      els.changedHint.textContent = changed > 0
-        ? `${changed} usuário(s) com alterações pendentes.`
-        : "Nenhuma alteração pendente.";
-      els.changedHint.style.color = changed > 0 ? "var(--brand)" : "var(--ink-muted)";
+      if (hasConflicts) {
+        const conflictCount = state.conflictsMap.size;
+        els.changedHint.innerHTML = `⚠️ <strong style="color: var(--danger); font-weight: 700;">${conflictCount} usuário(s) com conflito de username (duplicado ou similar).</strong> Edite os dados ou remova as linhas em destaque para poder salvar.`;
+        els.changedHint.style.color = "var(--danger)";
+      } else {
+        els.changedHint.textContent = changed > 0
+          ? `${changed} usuário(s) com alterações pendentes.`
+          : "Nenhuma alteração pendente.";
+        els.changedHint.style.color = changed > 0 ? "var(--brand)" : "var(--ink-muted)";
+      }
     }
 
     if (els.bulkScope) {
@@ -659,6 +798,7 @@ const UsersModule = (() => {
   function renderTable() {
     if (!els.tableBody) return;
 
+    computeUsernameConflicts();
     const filtered = getFilteredUsers();
     const sorted = getSortedUsers(filtered);
 
@@ -700,10 +840,17 @@ const UsersModule = (() => {
     pageItems.forEach((user) => {
       const tr = document.createElement("tr");
       const changed = isUserChanged(user);
-      if (changed) tr.classList.add("row-changed");
-
       const uId = String(user.id);
       const isSelected = state.selectedUserIds.has(uId);
+
+      const userConflicts = state.conflictsMap ? state.conflictsMap.get(user.id) : null;
+      const hasConflict = Array.isArray(userConflicts) && userConflicts.length > 0;
+
+      if (hasConflict) {
+        tr.classList.add("row-conflict");
+      } else if (changed) {
+        tr.classList.add("row-changed");
+      }
 
       const customLabels = getUserCustomLabels(user);
       const labelsHtml = (customLabels && customLabels.length > 0)
@@ -722,11 +869,22 @@ const UsersModule = (() => {
         ? '<span class="badge badge-ac">Ativo</span>'
         : '<span class="badge badge-dim">Inativo</span>';
 
+      let conflictBadge = "";
+      if (hasConflict) {
+        const descriptions = userConflicts
+          .map((c) => `<div class="pill-conflict" title="${sanitize(`${c.reason}: ${c.otherUsername}`)}">⚠️ ${sanitize(`${c.reason}: "${c.otherUsername}"`)}</div>`)
+          .join("");
+        conflictBadge = `<div class="conflict-wrapper" style="margin-top: 4px;">${descriptions}</div>`;
+      }
+
       tr.innerHTML = `
         <td style="text-align: center;">
           <input type="checkbox" class="user-row-checkbox" data-id="${sanitize(uId)}" ${isSelected ? "checked" : ""} />
         </td>
-        <td style="font-family: var(--font-mono); font-weight: 700; color: var(--ink);">${sanitize(user.username)}</td>
+        <td>
+          <div style="font-family: var(--font-mono); font-weight: 700; color: var(--ink);">${sanitize(user.username)}</div>
+          ${conflictBadge}
+        </td>
         <td>
           <div style="font-weight: 600;">${sanitize(user.name)}</div>
           ${changed ? '<span class="pill pill-role" style="font-size: 0.65rem;">Modificado</span>' : ""}
@@ -736,8 +894,9 @@ const UsersModule = (() => {
         <td><div class="pill-list">${labelsHtml}</div></td>
         <td><div class="pill-list">${rolesHtml}</div></td>
         <td style="text-align: center;">${statusBadge}</td>
-        <td style="text-align: right;">
-          <button type="button" class="btn-sm dim edit-user-btn" data-id="${sanitize(uId)}">✏️ Editar</button>
+        <td style="text-align: right; white-space: nowrap;">
+          <button type="button" class="btn-sm dim edit-user-btn" data-id="${sanitize(uId)}" title="Editar dados deste usuário">✏️ Editar</button>
+          <button type="button" class="btn-sm btn-delete-row" data-id="${sanitize(uId)}" title="Remover usuário desta tabela" style="margin-left: 6px; color: var(--danger); border-color: rgba(239, 68, 68, 0.35);">🗑️</button>
         </td>
       `;
 
@@ -763,8 +922,39 @@ const UsersModule = (() => {
         openEditModal(user);
       });
 
+      // Botão remover linha
+      const delBtn = tr.querySelector(".btn-delete-row");
+      if (delBtn) {
+        delBtn.addEventListener("click", () => {
+          deleteUserRow(user.id);
+        });
+      }
+
       els.tableBody.appendChild(tr);
     });
+  }
+
+  // --------------------------------------------------------------------------
+  // REMOVER LINHA / USUÁRIO DA TABELA
+  // --------------------------------------------------------------------------
+  function deleteUserRow(userId) {
+    const user = state.users.find((u) => String(u.id) === String(userId));
+    if (!user) return;
+
+    const isNew = !state.originalUsersMap.has(user.id) || String(userId).startsWith("new_") || String(userId).startsWith("batch_");
+    const confirmMsg = isNew
+      ? `Remover o usuário adicionado "${user.username}" da tabela?`
+      : `Remover "${user.username}" da tabela local? (As alterações não salvas serão descartadas)`;
+
+    if (!confirm(confirmMsg)) return;
+
+    state.users = state.users.filter((u) => String(u.id) !== String(userId));
+    state.selectedUserIds.delete(String(userId));
+
+    populateFilterDropdowns();
+    updateKpis();
+    renderTable();
+    showToast(`Usuário "${user.username}" removido da tabela.`, "info");
   }
 
   // --------------------------------------------------------------------------
@@ -855,8 +1045,8 @@ const UsersModule = (() => {
 
     els.editModal.hidden = true;
     populateFilterDropdowns();
-    renderTable();
     updateKpis();
+    renderTable();
     showToast(`Usuário ${user.username} atualizado localmente. Clique em "Salvar no DOMjudge" para sincronizar.`, "success");
   }
 
@@ -999,9 +1189,14 @@ const UsersModule = (() => {
     els.createModal.hidden = true;
     els.createSingleForm.reset();
     populateFilterDropdowns();
-    renderTable();
     updateKpis();
-    showToast(`Usuário ${username} adicionado à lista para salvar!`, "success");
+    renderTable();
+
+    if (state.conflictsMap && state.conflictsMap.has(newUser.id)) {
+      showToast(`Atenção: Username "${username}" é idêntico ou similar a outro usuário na tabela! Edite ou remova a linha para poder salvar.`, "warning", 8000);
+    } else {
+      showToast(`Usuário ${username} adicionado à lista para salvar!`, "success");
+    }
   }
 
   function processBatchUsers() {
@@ -1037,9 +1232,15 @@ const UsersModule = (() => {
     els.createModal.hidden = true;
     els.batchInputText.value = "";
     populateFilterDropdowns();
-    renderTable();
     updateKpis();
-    showToast(`${parsed.length} usuários adicionados com sucesso!`, "success");
+    renderTable();
+
+    const conflictCount = state.conflictsMap ? state.conflictsMap.size : 0;
+    if (conflictCount > 0) {
+      showToast(`${parsed.length} usuário(s) adicionados. Atenção: ${conflictCount} usuário(s) possuem conflito de username (duplicado ou similar). Edite ou remova as linhas para salvar.`, "warning", 9000);
+    } else {
+      showToast(`${parsed.length} usuários adicionados com sucesso!`, "success");
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -1148,6 +1349,12 @@ const UsersModule = (() => {
     const creds = window.getApiCredentials ? window.getApiCredentials() : null;
     if (!creds || !creds.apiBase) {
       showToast("Sessão da API não disponível.", "error");
+      return;
+    }
+
+    computeUsernameConflicts();
+    if (state.conflictsMap && state.conflictsMap.size > 0) {
+      showToast(`Não é possível salvar: existem ${state.conflictsMap.size} usuário(s) com username duplicado ou similar em conflito. Edite ou remova as linhas antes de sincronizar.`, "error", 8000);
       return;
     }
 
@@ -1369,7 +1576,7 @@ const UsersModule = (() => {
       }
       showToast(`Erro ao salvar alterações: ${err.message}`, "error", 10000);
     } finally {
-      els.saveChangesBtn.disabled = state.users.filter(isUserChanged).length === 0;
+      updateKpis();
     }
   }
 
