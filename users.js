@@ -164,82 +164,15 @@ const UsersModule = (() => {
   }
 
   // --------------------------------------------------------------------------
-  // DETECÇÃO DE CONFLITOS DE USERNAME (DUPLICADOS E SIMILARES)
+  // DETECÇÃO DE USERNAME DUPLICADO (APENAS DUPLICAÇÕES EXATAS)
   // --------------------------------------------------------------------------
-  function normalizeUsername(str) {
-    return String(str || "")
-      .trim()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-  }
-
-  function levenshtein(a, b) {
-    const m = a.length;
-    const n = b.length;
-    if (m === 0) return n;
-    if (n === 0) return m;
-
-    const row = new Array(n + 1);
-    for (let j = 0; j <= n; j++) row[j] = j;
-
-    for (let i = 1; i <= m; i++) {
-      let prevDiag = row[0];
-      row[0] = i;
-      for (let j = 1; j <= n; j++) {
-        const temp = row[j];
-        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-        row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prevDiag + cost);
-        prevDiag = temp;
-      }
-    }
-    return row[n];
-  }
-
-  function checkUsernameSimilarity(u1, u2) {
+  function checkUsernameDuplicate(u1, u2) {
     const raw1 = String(u1 || "").trim();
     const raw2 = String(u2 || "").trim();
     if (!raw1 || !raw2) return null;
 
-    // 1. Exatamente idênticos (case-insensitive)
     if (raw1.toLowerCase() === raw2.toLowerCase()) {
-      return { type: "duplicate", reason: "Username idêntico" };
-    }
-
-    const norm1 = normalizeUsername(raw1);
-    const norm2 = normalizeUsername(raw2);
-
-    // 2. Idênticos após remoção de acentos
-    if (norm1 === norm2) {
-      return { type: "case_accent", reason: "Username duplicado (variação de acentos/maiúsculas)" };
-    }
-
-    // 3. Similaridade removendo separadores (. _ - espaço)
-    const clean1 = norm1.replace(/[\s._-]+/g, "");
-    const clean2 = norm2.replace(/[\s._-]+/g, "");
-
-    if (clean1 === clean2) {
-      return { type: "separator", reason: "Username similar (diferença apenas em pontos ou traços)" };
-    }
-
-    // Proteger sequências numéricas intencionais (ex: aluno01 e aluno02, team1 e team2)
-    const matchSeq1 = clean1.match(/^([a-z_-]+)(\d+)$/);
-    const matchSeq2 = clean2.match(/^([a-z_-]+)(\d+)$/);
-    if (matchSeq1 && matchSeq2 && matchSeq1[1] === matchSeq2[1]) {
-      if (matchSeq1[2] !== matchSeq2[2]) {
-        return null; // Sequência numerada intencional permitida
-      }
-    }
-
-    // 4. Quase idênticos por distância de edição (1 caractere em nomes com 5+ letras, ou 2 caracteres em nomes com 8+ letras)
-    if (clean1.length >= 5 && clean2.length >= 5) {
-      const dist = levenshtein(clean1, clean2);
-      if (dist === 1) {
-        return { type: "typo", reason: "Username quase idêntico (diferença de 1 caractere)" };
-      }
-      if (clean1.length >= 8 && clean2.length >= 8 && dist === 2) {
-        return { type: "similar", reason: "Username altamente similar" };
-      }
+      return { type: "duplicate", reason: "Username duplicado" };
     }
 
     return null;
@@ -259,7 +192,7 @@ const UsersModule = (() => {
         const name2 = (u2.username || "").trim();
         if (!name2) continue;
 
-        const conflict = checkUsernameSimilarity(name1, name2);
+        const conflict = checkUsernameDuplicate(name1, name2);
         if (conflict) {
           if (!conflicts.has(u1.id)) conflicts.set(u1.id, []);
           conflicts.get(u1.id).push({
@@ -322,11 +255,11 @@ const UsersModule = (() => {
     if (els.kpiCategories) els.kpiCategories.textContent = categories;
     if (els.kpiTeams) els.kpiTeams.textContent = teams;
 
-    // Se houver conflitos de similaridade/duplicidade, NÃO habilitar o botão de salvar
+    // Se houver duplicidade de usernames, NÃO habilitar o botão de salvar
     if (els.saveChangesBtn) {
       els.saveChangesBtn.disabled = changed === 0 || hasConflicts;
       if (hasConflicts) {
-        els.saveChangesBtn.title = "Não é possível salvar: existem usuários com username duplicado ou similar em conflito.";
+        els.saveChangesBtn.title = "Não é possível salvar: existem usuários com username duplicado.";
       } else {
         els.saveChangesBtn.title = changed > 0 ? "Salvar alterações no DOMjudge" : "Nenhuma alteração pendente";
       }
@@ -335,7 +268,7 @@ const UsersModule = (() => {
     if (els.changedHint) {
       if (hasConflicts) {
         const conflictCount = state.conflictsMap.size;
-        els.changedHint.innerHTML = `⚠️ <strong style="color: var(--danger); font-weight: 700;">${conflictCount} usuário(s) com conflito de username (duplicado ou similar).</strong> Edite os dados ou remova as linhas em destaque para poder salvar.`;
+        els.changedHint.innerHTML = `⚠️ <strong style="color: var(--danger); font-weight: 700;">${conflictCount} usuário(s) com username duplicado.</strong> Edite os dados ou remova as linhas em destaque para poder salvar.`;
         els.changedHint.style.color = "var(--danger)";
       } else {
         els.changedHint.textContent = changed > 0
@@ -1193,7 +1126,7 @@ const UsersModule = (() => {
     renderTable();
 
     if (state.conflictsMap && state.conflictsMap.has(newUser.id)) {
-      showToast(`Atenção: Username "${username}" é idêntico ou similar a outro usuário na tabela! Edite ou remova a linha para poder salvar.`, "warning", 8000);
+      showToast(`Atenção: Username "${username}" já existe na tabela! Edite ou remova a linha para poder salvar.`, "warning", 8000);
     } else {
       showToast(`Usuário ${username} adicionado à lista para salvar!`, "success");
     }
@@ -1237,7 +1170,7 @@ const UsersModule = (() => {
 
     const conflictCount = state.conflictsMap ? state.conflictsMap.size : 0;
     if (conflictCount > 0) {
-      showToast(`${parsed.length} usuário(s) adicionados. Atenção: ${conflictCount} usuário(s) possuem conflito de username (duplicado ou similar). Edite ou remova as linhas para salvar.`, "warning", 9000);
+      showToast(`${parsed.length} usuário(s) adicionados. Atenção: ${conflictCount} usuário(s) possuem username duplicado. Edite ou remova as linhas para salvar.`, "warning", 9000);
     } else {
       showToast(`${parsed.length} usuários adicionados com sucesso!`, "success");
     }
@@ -1354,7 +1287,7 @@ const UsersModule = (() => {
 
     computeUsernameConflicts();
     if (state.conflictsMap && state.conflictsMap.size > 0) {
-      showToast(`Não é possível salvar: existem ${state.conflictsMap.size} usuário(s) com username duplicado ou similar em conflito. Edite ou remova as linhas antes de sincronizar.`, "error", 8000);
+      showToast(`Não é possível salvar: existem ${state.conflictsMap.size} usuário(s) com username duplicado em conflito. Edite ou remova as linhas antes de sincronizar.`, "error", 8000);
       return;
     }
 
