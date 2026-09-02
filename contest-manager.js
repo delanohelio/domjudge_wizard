@@ -1,767 +1,530 @@
-const state = {
-  apiBase: "https://coderunner.cin.ufpe.br/api/v4",
-  apiUser: "",
-  apiPassword: "",
-  contests: [],
-  filterText: "",
-  filterEnabled: "all",
-  filterChanged: "all",
-  sortKey: "title",
-  sortDir: "asc",
-  page: 1,
-  pageSize: 15,
-};
+// ============================================================================
+// DOMJUDGE WIZARD - GERENCIADOR DE CONTESTS (SPA MODULE)
+// ============================================================================
 
-const els = {
-  apiBase: document.getElementById("managerApiBase"),
-  apiUser: document.getElementById("managerApiUser"),
-  apiPassword: document.getElementById("managerApiPassword"),
-  extraContestIds: document.getElementById("managerExtraContestIds"),
-  loadBtn: document.getElementById("managerLoadBtn"),
-  saveChangedBtn: document.getElementById("managerSaveChangedBtn"),
-  filterText: document.getElementById("managerFilterText"),
-  filterEnabled: document.getElementById("managerFilterEnabled"),
-  filterChanged: document.getElementById("managerFilterChanged"),
-  changedHint: document.getElementById("managerChangedHint"),
-  bulkStart: document.getElementById("managerBulkStart"),
-  bulkEnd: document.getElementById("managerBulkEnd"),
-  bulkEnabled: document.getElementById("managerBulkEnabled"),
-  bulkScope: document.getElementById("managerBulkScope"),
-  applyBulkBtn: document.getElementById("managerApplyBulkBtn"),
-  bulkHint: document.getElementById("managerBulkHint"),
-  pageSize: document.getElementById("managerPageSize"),
-  prevPageBtn: document.getElementById("managerPrevPageBtn"),
-  nextPageBtn: document.getElementById("managerNextPageBtn"),
-  pageLabel: document.getElementById("managerPageLabel"),
-  pageStats: document.getElementById("managerPageStats"),
-  status: document.getElementById("managerStatus"),
-  list: document.getElementById("contestManagerList"),
-};
+const ContestManagerModule = (() => {
+  const state = {
+    contests: [],
+    filterText: "",
+    filterEnabled: "all",
+    filterChanged: "all",
+    sortKey: "id",
+    sortDir: "asc",
+    page: 1,
+    pageSize: 100,
+  };
 
-function parseContestIdList(value) {
-  const seen = new Set();
-  return String(value || "")
-    .split(/[\s,;]+/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
-    .filter((item) => {
-      const key = String(item);
-      if (seen.has(key)) return false;
-      seen.add(key);
+  const els = {
+    loadBtn: document.getElementById("managerLoadBtn"),
+    saveChangedBtn: document.getElementById("managerSaveChangedBtn"),
+    filterText: document.getElementById("managerFilterText"),
+    filterEnabled: document.getElementById("managerFilterEnabled"),
+    filterChanged: document.getElementById("managerFilterChanged"),
+    extraContestIds: document.getElementById("managerExtraContestIds"),
+    changedHint: document.getElementById("managerChangedHint"),
+    bulkStart: document.getElementById("managerBulkStart"),
+    bulkEnd: document.getElementById("managerBulkEnd"),
+    bulkEnabled: document.getElementById("managerBulkEnabled"),
+    bulkScope: document.getElementById("managerBulkScope"),
+    applyBulkBtn: document.getElementById("managerApplyBulkBtn"),
+    pageSize: document.getElementById("managerPageSize"),
+    prevPageBtn: document.getElementById("managerPrevPageBtn"),
+    nextPageBtn: document.getElementById("managerNextPageBtn"),
+    pageLabel: document.getElementById("managerPageLabel"),
+    pageStats: document.getElementById("managerPageStats"),
+    tableBody: document.getElementById("contestTableBody"),
+    kpiTotal: document.getElementById("kpiContestTotal"),
+    kpiActive: document.getElementById("kpiContestActive"),
+    kpiUpcoming: document.getElementById("kpiContestUpcoming"),
+    kpiChanged: document.getElementById("kpiContestChanged"),
+  };
+
+  function showToast(msg, type = "info") {
+    if (window.showToast) {
+      window.showToast(msg, type);
+    } else {
+      console.log(`[${type}] ${msg}`);
+    }
+  }
+
+  function sanitize(text) {
+    return String(text ?? "").replace(/[<>]/g, "");
+  }
+
+  function getContestId(contest) {
+    return contest.id || contest.cid || contest.shortname || "";
+  }
+
+  function getContestTitle(contest) {
+    return contest.name || contest.formal_name || contest.shortname || getContestId(contest);
+  }
+
+  function formatDateForInput(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const tzOffset = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - tzOffset).toISOString().slice(0, 16);
+  }
+
+  function formatDateForLabel(value) {
+    if (!value) return "Não definido";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return sanitize(value);
+    return date.toLocaleString("pt-BR");
+  }
+
+  function parseDateInputToIso(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString();
+  }
+
+  function getContestStatusInfo(contest) {
+    const isEnabled = Boolean(contest.enabled ?? true);
+    if (!isEnabled) {
+      return { label: "Desabilitado", badgeClass: "badge-dim" };
+    }
+
+    const now = Date.now();
+    const start = contest.start_time ? new Date(contest.start_time).getTime() : null;
+    const end = contest.end_time ? new Date(contest.end_time).getTime() : null;
+
+    if (start && start > now) {
+      return { label: "Agendado", badgeClass: "badge-tle" };
+    }
+    if (end && end < now) {
+      return { label: "Finalizado", badgeClass: "badge-dim" };
+    }
+    return { label: "Em Andamento", badgeClass: "badge-ac" };
+  }
+
+  function isContestChanged(item) {
+    return item.draft.start !== item.orig.start ||
+      item.draft.end !== item.orig.end ||
+      item.draft.enabled !== item.orig.enabled;
+  }
+
+  function updateKpis() {
+    const total = state.contests.length;
+    const active = state.contests.filter((c) => Boolean(c.draft.enabled)).length;
+    const now = Date.now();
+    const upcoming = state.contests.filter((c) => {
+      if (!c.draft.enabled) return false;
+      const s = c.draft.start ? new Date(c.draft.start).getTime() : null;
+      return s && s > now;
+    }).length;
+    const changed = state.contests.filter(isContestChanged).length;
+
+    if (els.kpiTotal) els.kpiTotal.textContent = total;
+    if (els.kpiActive) els.kpiActive.textContent = active;
+    if (els.kpiUpcoming) els.kpiUpcoming.textContent = upcoming;
+    if (els.kpiChanged) els.kpiChanged.textContent = changed;
+
+    if (els.saveChangedBtn) {
+      els.saveChangedBtn.disabled = changed === 0;
+    }
+    if (els.changedHint) {
+      els.changedHint.textContent = changed > 0
+        ? `${changed} contest(s) com alterações pendentes.`
+        : "Nenhuma alteração pendente.";
+      els.changedHint.style.color = changed > 0 ? "var(--brand)" : "var(--ink-muted)";
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // CARREGAR CONTESTS DA API
+  // --------------------------------------------------------------------------
+  async function loadContests() {
+    const creds = window.getApiCredentials ? window.getApiCredentials() : null;
+    if (!creds || !creds.apiBase) {
+      showToast("Sessão da API não disponível.", "error");
+      return;
+    }
+
+    try {
+      showToast("Carregando lista de contests do DOMjudge...", "info");
+      if (els.tableBody) {
+        els.tableBody.innerHTML = `<tr><td colspan="6" style="text-align: center; padding: 24px; color: var(--ink-muted);">Carregando contests...</td></tr>`;
+      }
+
+      const headers = {};
+      if (creds.user && creds.password) {
+        headers["Authorization"] = `Basic ${btoa(`${creds.user}:${creds.password}`)}`;
+      }
+
+      const res = await fetch(`${creds.apiBase}/contests`, { headers });
+      if (!res.ok) {
+        throw new Error(`API HTTP ${res.status}: ${res.statusText}`);
+      }
+
+      const rawContests = await res.json();
+      if (!Array.isArray(rawContests)) {
+        throw new Error("Formato de resposta inesperado da API.");
+      }
+
+      state.contests = rawContests.map((c) => {
+        const start = c.start_time || null;
+        const end = c.end_time || null;
+        const enabled = Boolean(c.enabled ?? true);
+        return {
+          id: getContestId(c),
+          name: getContestTitle(c),
+          raw: c,
+          orig: { start, end, enabled },
+          draft: { start, end, enabled },
+        };
+      });
+
+      state.page = 1;
+      renderTable();
+      updateKpis();
+      showToast(`${state.contests.length} contests carregados com sucesso!`, "success");
+    } catch (err) {
+      if (err.message && (err.message.includes("401") || err.message.includes("403"))) {
+        if (window.handleApiUnauthorized) window.handleApiUnauthorized(err);
+      }
+      showToast(`Falha ao carregar contests: ${err.message}`, "error");
+      if (els.tableBody) {
+        els.tableBody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 24px;">
+          <div>Erro ao carregar: ${sanitize(err.message)}</div>
+          ${(err.message && err.message.includes("401")) ? '<button type="button" class="primary btn-sm" style="margin-top: 10px;" onclick="window.handleApiUnauthorized && window.handleApiUnauthorized()">🔑 Renovar Token / Login</button>' : ''}
+        </td></tr>`;
+      }
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // FILTRAGEM, ORDENAÇÃO E PAGINAÇÃO
+  // --------------------------------------------------------------------------
+  function getFilteredContests() {
+    const query = state.filterText.toLowerCase().trim();
+
+    return state.contests.filter((item) => {
+      // Filtro de texto (nome ou ID)
+      if (query) {
+        const idMatch = String(item.id).toLowerCase().includes(query);
+        const nameMatch = item.name.toLowerCase().includes(query);
+        if (!idMatch && !nameMatch) return false;
+      }
+
+      // Filtro de status habilitado
+      if (state.filterEnabled === "enabled" && !item.draft.enabled) return false;
+      if (state.filterEnabled === "disabled" && item.draft.enabled) return false;
+
+      // Filtro de alteração
+      const changed = isContestChanged(item);
+      if (state.filterChanged === "changed" && !changed) return false;
+      if (state.filterChanged === "unchanged" && changed) return false;
+
       return true;
     });
-}
-
-function mergeContestsById(baseList, extraList) {
-  const byId = new Map();
-  [...(baseList || []), ...(extraList || [])].forEach((contest) => {
-    const id = getContestId(contest);
-    if (!id) return;
-    byId.set(String(id), contest);
-  });
-  return Array.from(byId.values());
-}
-
-function sanitize(text) {
-  return String(text ?? "").replace(/[<>]/g, "");
-}
-
-function setStatus(message, isError = false) {
-  if (!els.status) return;
-  els.status.textContent = message;
-  els.status.style.color = isError ? "#b91c1c" : "var(--muted)";
-}
-
-function normalizeApiBase(url) {
-  const cleaned = String(url || "").trim().replace(/\/+$/, "");
-  if (cleaned.endsWith("/api/v4") || cleaned.endsWith("/api")) return cleaned;
-  return `${cleaned}/api/v4`;
-}
-
-function buildBasicAuthHeader(user, password) {
-  return `Basic ${btoa(`${user}:${password}`)}`;
-}
-
-function formatDateForInput(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const tzOffset = date.getTimezoneOffset() * 60000;
-  return new Date(date.getTime() - tzOffset).toISOString().slice(0, 16);
-}
-
-function formatDateForLabel(value) {
-  if (!value) return "nao definido";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return sanitize(value);
-  return date.toLocaleString("pt-BR");
-}
-
-function parseDateInputToIso(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return null;
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
-}
-
-function parseFlexibleDateToTime(value) {
-  if (!value) return null;
-  const text = String(value).trim();
-  if (!text) return null;
-
-  const direct = new Date(text);
-  if (!Number.isNaN(direct.getTime())) return direct.getTime();
-
-  const brMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
-  if (brMatch) {
-    const day = Number(brMatch[1]);
-    const month = Number(brMatch[2]) - 1;
-    const year = Number(brMatch[3]);
-    const hour = Number(brMatch[4] || 0);
-    const minute = Number(brMatch[5] || 0);
-    const second = Number(brMatch[6] || 0);
-    const date = new Date(year, month, day, hour, minute, second);
-    if (!Number.isNaN(date.getTime())) return date.getTime();
   }
 
-  const isoNoTzMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/);
-  if (isoNoTzMatch) {
-    const year = Number(isoNoTzMatch[1]);
-    const month = Number(isoNoTzMatch[2]) - 1;
-    const day = Number(isoNoTzMatch[3]);
-    const hour = Number(isoNoTzMatch[4]);
-    const minute = Number(isoNoTzMatch[5]);
-    const second = Number(isoNoTzMatch[6] || 0);
-    const date = new Date(year, month, day, hour, minute, second);
-    if (!Number.isNaN(date.getTime())) return date.getTime();
+  function getSortedContests(items) {
+    return items.slice().sort((a, b) => {
+      let valA, valB;
+      if (state.sortKey === "id") {
+        valA = Number(a.id) || a.id;
+        valB = Number(b.id) || b.id;
+      } else {
+        valA = a.name.toLowerCase();
+        valB = b.name.toLowerCase();
+      }
+
+      if (valA < valB) return state.sortDir === "asc" ? -1 : 1;
+      if (valA > valB) return state.sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
   }
 
-  return null;
-}
+  function renderTable() {
+    if (!els.tableBody) return;
 
-function getContestId(contest) {
-  return String(contest.id ?? contest.cid ?? "");
-}
+    const filtered = getFilteredContests();
+    const sorted = getSortedContests(filtered);
 
-function getContestTitle(contest) {
-  return contest.shortname || contest.name || getContestId(contest);
-}
+    const total = sorted.length;
+    const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
+    if (state.page > totalPages) state.page = totalPages;
 
-function getStartTime(contest) {
-  return contest.start_time ?? contest.activate_time ?? contest.starttime ?? null;
-}
+    const startIdx = (state.page - 1) * state.pageSize;
+    const pageItems = sorted.slice(startIdx, startIdx + state.pageSize);
 
-function getEndTime(contest) {
-  return contest.end_time ?? contest.deactivate_time ?? contest.endtime ?? null;
-}
-
-function getEnabled(contest) {
-  if (typeof contest.enabled === "boolean") return contest.enabled;
-  if (typeof contest.active === "boolean") return contest.active;
-  if (typeof contest.allow_submit === "boolean") return contest.allow_submit;
-  return false;
-}
-
-function buildContestRow(contest) {
-  const id = getContestId(contest);
-  const title = getContestTitle(contest);
-  const startOriginal = getStartTime(contest);
-  const endOriginal = getEndTime(contest);
-  const enabledOriginal = getEnabled(contest);
-
-  return {
-    id,
-    title,
-    raw: contest,
-    startOriginal,
-    endOriginal,
-    enabledOriginal,
-    startEdit: startOriginal,
-    endEdit: endOriginal,
-    enabledEdit: enabledOriginal,
-    saveResult: "",
-  };
-}
-
-function sameIsoDate(a, b) {
-  const left = a || null;
-  const right = b || null;
-  return left === right;
-}
-
-function isRowChanged(row) {
-  return !sameIsoDate(row.startEdit, row.startOriginal) || !sameIsoDate(row.endEdit, row.endOriginal) || row.enabledEdit !== row.enabledOriginal;
-}
-
-function getChangedRows() {
-  return state.contests.filter((row) => isRowChanged(row));
-}
-
-function normalizeSaveResultText(message) {
-  const text = String(message || "").trim();
-  return text || "-";
-}
-
-function sortArrowFor(key) {
-  if (state.sortKey !== key) return "";
-  return state.sortDir === "asc" ? " ▲" : " ▼";
-}
-
-function updateBulkInfo() {
-  const changed = getChangedRows().length;
-  if (els.saveChangedBtn) {
-    els.saveChangedBtn.disabled = changed === 0;
-  }
-  if (els.changedHint) {
-    els.changedHint.textContent = changed ? `${changed} contest(s) alterado(s) aguardando salvar.` : "Nenhuma alteracao pendente.";
-  }
-}
-
-function applyFilters(rows) {
-  const term = state.filterText.trim().toLowerCase();
-  return rows.filter((row) => {
-    if (term) {
-      const haystack = `${row.title} ${row.id}`.toLowerCase();
-      if (!haystack.includes(term)) return false;
+    if (els.pageLabel) els.pageLabel.textContent = `Página ${state.page} de ${totalPages}`;
+    if (els.pageStats) {
+      els.pageStats.textContent = total > 0
+        ? `Mostrando ${startIdx + 1} a ${Math.min(startIdx + state.pageSize, total)} de ${total}`
+        : "Nenhum contest encontrado";
     }
 
-    if (state.filterEnabled === "enabled" && !row.enabledEdit) return false;
-    if (state.filterEnabled === "disabled" && row.enabledEdit) return false;
+    if (els.prevPageBtn) els.prevPageBtn.disabled = state.page <= 1;
+    if (els.nextPageBtn) els.nextPageBtn.disabled = state.page >= totalPages;
 
-    const changed = isRowChanged(row);
-    if (state.filterChanged === "changed" && !changed) return false;
-    if (state.filterChanged === "unchanged" && changed) return false;
-
-    return true;
-  });
-}
-
-function getFilteredSortedRows() {
-  return sortRows(applyFilters(state.contests));
-}
-
-function compareNullableText(a, b) {
-  return String(a || "").localeCompare(String(b || ""), "pt-BR");
-}
-
-function compareNullableDate(a, b) {
-  const aTime = parseFlexibleDateToTime(a);
-  const bTime = parseFlexibleDateToTime(b);
-  if (aTime === null && bTime === null) return 0;
-  if (aTime === null) return 1;
-  if (bTime === null) return -1;
-  if (aTime === bTime) return 0;
-  return aTime < bTime ? -1 : 1;
-}
-
-function sortRows(rows) {
-  const sorted = rows.slice().sort((a, b) => {
-    if (state.sortKey === "id") return compareNullableText(a.id, b.id);
-    if (state.sortKey === "title") return compareNullableText(a.title, b.title);
-    if (state.sortKey === "start") return compareNullableDate(a.startEdit, b.startEdit);
-    if (state.sortKey === "end") return compareNullableDate(a.endEdit, b.endEdit);
-    if (state.sortKey === "enabled") return Number(a.enabledEdit) - Number(b.enabledEdit);
-    if (state.sortKey === "changed") return Number(isRowChanged(a)) - Number(isRowChanged(b));
-    if (state.sortKey === "save") return compareNullableText(a.saveResult, b.saveResult);
-    return compareNullableText(a.title, b.title);
-  });
-
-  return state.sortDir === "asc" ? sorted : sorted.reverse();
-}
-
-function setSort(key) {
-  if (state.sortKey === key) {
-    state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
-  } else {
-    state.sortKey = key;
-    state.sortDir = "asc";
-  }
-  state.page = 1;
-  renderContestTable();
-}
-
-function paginateRows(rows) {
-  const totalRows = rows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / state.pageSize));
-
-  if (state.page > totalPages) state.page = totalPages;
-  if (state.page < 1) state.page = 1;
-
-  const start = (state.page - 1) * state.pageSize;
-  const end = start + state.pageSize;
-  const items = rows.slice(start, end);
-
-  return {
-    items,
-    totalRows,
-    totalPages,
-    startIndex: start + 1,
-    endIndex: start + items.length,
-  };
-}
-
-function updatePaginationUi(totalRows, totalPages, startIndex, endIndex) {
-  if (els.prevPageBtn) {
-    els.prevPageBtn.disabled = state.page <= 1;
-  }
-  if (els.nextPageBtn) {
-    els.nextPageBtn.disabled = state.page >= totalPages;
-  }
-  if (els.pageLabel) {
-    els.pageLabel.textContent = `Pagina ${state.page} de ${totalPages}`;
-  }
-  if (els.pageStats) {
-    if (!totalRows) {
-      els.pageStats.textContent = "Mostrando 0 de 0";
-    } else {
-      els.pageStats.textContent = `Mostrando ${startIndex}-${endIndex} de ${totalRows}`;
-    }
-  }
-  if (els.pageSize) {
-    els.pageSize.value = String(state.pageSize);
-  }
-}
-
-async function apiFetch(path, options = {}) {
-  const apiBase = normalizeApiBase(state.apiBase);
-  const user = String(state.apiUser || "").trim();
-  const password = state.apiPassword || "";
-
-  if (!apiBase || !user || !password) {
-    throw new Error("Preencha API base, usuario e senha.");
-  }
-
-  const response = await fetch(`${apiBase}/${String(path || "").replace(/^\/+/, "")}`, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      Authorization: buildBasicAuthHeader(user, password),
-      ...(options.headers || {}),
-    },
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Falha API (${response.status}): ${text || "sem detalhe"}`);
-  }
-
-  if (response.status === 204) return null;
-  const raw = await response.text();
-  return raw.trim() ? JSON.parse(raw) : null;
-}
-
-function buildUpdateAttempts(startTime, endTime, enabled) {
-  const variants = [
-    {
-      start_time: startTime,
-      end_time: endTime,
-      enabled,
-    },
-    {
-      start_time: startTime,
-      end_time: endTime,
-      active: enabled,
-    },
-    {
-      activate_time: startTime,
-      deactivate_time: endTime,
-      enabled,
-    },
-    {
-      activate_time: startTime,
-      deactivate_time: endTime,
-      active: enabled,
-    },
-  ];
-
-  return variants.map((body) => ({
-    method: "PATCH",
-    body,
-  }));
-}
-
-async function updateContest(contestId, startTime, endTime, enabled) {
-  const attempts = buildUpdateAttempts(startTime, endTime, enabled);
-  let lastError = null;
-
-  for (const attempt of attempts) {
-    try {
-      const payload = JSON.stringify(attempt.body);
-      await apiFetch(`contests/${encodeURIComponent(contestId)}`, {
-        method: attempt.method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: payload,
-      });
+    if (pageItems.length === 0) {
+      els.tableBody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--ink-muted); padding: 24px;">Nenhum contest corresponde aos filtros aplicados.</td></tr>`;
       return;
-    } catch (error) {
-      lastError = error;
     }
-  }
 
-  throw lastError || new Error("Nao foi possivel atualizar o contest.");
-}
+    els.tableBody.innerHTML = "";
 
-function bindRowInputs(tbody) {
-  tbody.querySelectorAll("tr[data-id]").forEach((tr) => {
-    const row = state.contests.find((entry) => entry.id === tr.dataset.id);
-    if (!row) return;
+    pageItems.forEach((item) => {
+      const tr = document.createElement("tr");
+      const changed = isContestChanged(item);
+      if (changed) tr.classList.add("row-changed");
 
-    const startInput = tr.querySelector(".manager-start");
-    const endInput = tr.querySelector(".manager-end");
-    const enabledInput = tr.querySelector(".manager-enabled");
+      const statusInfo = getContestStatusInfo({
+        enabled: item.draft.enabled,
+        start_time: item.draft.start,
+        end_time: item.draft.end,
+      });
 
-    const onUpdate = () => {
-      const startIso = parseDateInputToIso(startInput.value);
-      const endIso = parseDateInputToIso(endInput.value);
-
-      if (startInput.value && !startIso) {
-        startInput.setCustomValidity("Data invalida");
-      } else {
-        startInput.setCustomValidity("");
-      }
-
-      if (endInput.value && !endIso) {
-        endInput.setCustomValidity("Data invalida");
-      } else {
-        endInput.setCustomValidity("");
-      }
-
-      row.startEdit = startIso;
-      row.endEdit = endIso;
-      row.enabledEdit = Boolean(enabledInput.checked);
-      row.saveResult = "";
-
-      tr.querySelector(".manager-toggle-inline span").textContent = row.enabledEdit ? "Sim" : "Nao";
-      tr.querySelector(".manager-changed-cell").textContent = isRowChanged(row) ? "Sim" : "Nao";
-      tr.querySelector(".manager-save-cell").textContent = "-";
-      tr.classList.toggle("changed", isRowChanged(row));
-      updateBulkInfo();
-    };
-
-    startInput.addEventListener("input", onUpdate);
-    endInput.addEventListener("input", onUpdate);
-    enabledInput.addEventListener("change", onUpdate);
-  });
-}
-
-function renderContestTable() {
-  if (!els.list) return;
-  if (!state.contests.length) {
-    els.list.innerHTML = "";
-    setStatus("Nenhum contest encontrado para este usuario.");
-    updateBulkInfo();
-    updatePaginationUi(0, 1, 0, 0);
-    return;
-  }
-
-  const filteredSortedRows = getFilteredSortedRows();
-  const { items: pagedRows, totalRows, totalPages, startIndex, endIndex } = paginateRows(filteredSortedRows);
-
-  const wrapper = document.createElement("article");
-  wrapper.className = "card manager-table-card";
-  wrapper.innerHTML = `
-    <div class="manager-table-wrap">
-      <table class="manager-table">
-        <thead>
-          <tr>
-            <th><button type="button" class="manager-sort" data-sort="id">ID${sortArrowFor("id")}</button></th>
-            <th><button type="button" class="manager-sort" data-sort="title">Contest${sortArrowFor("title")}</button></th>
-            <th><button type="button" class="manager-sort" data-sort="start">Inicio atual${sortArrowFor("start")}</button></th>
-            <th><button type="button" class="manager-sort" data-sort="end">Fim atual${sortArrowFor("end")}</button></th>
-            <th><button type="button" class="manager-sort" data-sort="enabled">Habilitado${sortArrowFor("enabled")}</button></th>
-            <th><button type="button" class="manager-sort" data-sort="changed">Alterado${sortArrowFor("changed")}</button></th>
-            <th><button type="button" class="manager-sort" data-sort="save">Resultado save${sortArrowFor("save")}</button></th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  `;
-
-  const tbody = wrapper.querySelector("tbody");
-  if (!pagedRows.length) {
-    const row = document.createElement("tr");
-    row.innerHTML = '<td colspan="7" class="manager-empty">Nenhum contest corresponde aos filtros.</td>';
-    tbody.appendChild(row);
-  } else {
-    pagedRows.forEach((rowData) => {
-      const row = document.createElement("tr");
-      row.dataset.id = rowData.id;
-      if (isRowChanged(rowData)) row.classList.add("changed");
-      row.innerHTML = `
-        <td>${sanitize(rowData.id)}</td>
+      tr.innerHTML = `
+        <td style="font-family: var(--font-mono); font-weight: 700; color: var(--ink-secondary);">${sanitize(item.id)}</td>
         <td>
-          <strong>${sanitize(rowData.title)}</strong>
-          <div class="manager-sub">${sanitize(rowData.raw.name || "")}</div>
+          <div style="font-weight: 600; color: var(--ink);">${sanitize(item.name)}</div>
+          ${changed ? '<span class="pill pill-role" style="font-size: 0.68rem;">Modificado</span>' : ""}
         </td>
         <td>
-          <input class="manager-start" type="datetime-local" value="${formatDateForInput(rowData.startEdit)}" />
-          <div class="manager-sub">Original: ${sanitize(formatDateForLabel(rowData.startOriginal))}</div>
+          <input type="datetime-local" class="table-input-start" value="${formatDateForInput(item.draft.start)}" style="padding: 6px 8px; font-size: 0.82rem; width: 190px;" />
         </td>
         <td>
-          <input class="manager-end" type="datetime-local" value="${formatDateForInput(rowData.endEdit)}" />
-          <div class="manager-sub">Original: ${sanitize(formatDateForLabel(rowData.endOriginal))}</div>
+          <input type="datetime-local" class="table-input-end" value="${formatDateForInput(item.draft.end)}" style="padding: 6px 8px; font-size: 0.82rem; width: 190px;" />
         </td>
-        <td>
-          <label class="manager-toggle-inline">
-            <input class="manager-enabled" type="checkbox" ${rowData.enabledEdit ? "checked" : ""} />
-            <span>${rowData.enabledEdit ? "Sim" : "Nao"}</span>
+        <td style="text-align: center;">
+          <label class="switch-toggle">
+            <input type="checkbox" class="table-toggle-enabled" ${item.draft.enabled ? "checked" : ""} />
+            <span class="switch-slider"></span>
           </label>
         </td>
-        <td class="manager-changed-cell">${isRowChanged(rowData) ? "Sim" : "Nao"}</td>
-        <td class="manager-save-cell">${sanitize(normalizeSaveResultText(rowData.saveResult))}</td>
+        <td style="text-align: center;">
+          <span class="badge ${statusInfo.badgeClass}">${statusInfo.label}</span>
+        </td>
       `;
-      tbody.appendChild(row);
+
+      // Eventos de alteração inline
+      const startInput = tr.querySelector(".table-input-start");
+      const endInput = tr.querySelector(".table-input-end");
+      const enabledToggle = tr.querySelector(".table-toggle-enabled");
+
+      startInput.addEventListener("change", (e) => {
+        item.draft.start = parseDateInputToIso(e.target.value);
+        tr.classList.toggle("row-changed", isContestChanged(item));
+        updateKpis();
+      });
+
+      endInput.addEventListener("change", (e) => {
+        item.draft.end = parseDateInputToIso(e.target.value);
+        tr.classList.toggle("row-changed", isContestChanged(item));
+        updateKpis();
+      });
+
+      enabledToggle.addEventListener("change", (e) => {
+        item.draft.enabled = e.target.checked;
+        tr.classList.toggle("row-changed", isContestChanged(item));
+        updateKpis();
+      });
+
+      els.tableBody.appendChild(tr);
     });
   }
 
-  wrapper.querySelectorAll(".manager-sort").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setSort(btn.dataset.sort);
-    });
-  });
+  // --------------------------------------------------------------------------
+  // APLICAÇÃO EM MASSA
+  // --------------------------------------------------------------------------
+  function applyBulkChanges() {
+    const scope = els.bulkScope?.value || "page";
+    const newStart = parseDateInputToIso(els.bulkStart?.value);
+    const newEnd = parseDateInputToIso(els.bulkEnd?.value);
+    const enabledMode = els.bulkEnabled?.value || "keep";
 
-  els.list.innerHTML = "";
-  els.list.appendChild(wrapper);
-
-  bindRowInputs(tbody);
-  updateBulkInfo();
-  updatePaginationUi(totalRows, totalPages, startIndex, endIndex);
-}
-
-function getBulkTargetRows(scope) {
-  const filteredSortedRows = getFilteredSortedRows();
-  if (scope === "filtered") {
-    return filteredSortedRows;
-  }
-
-  const { items } = paginateRows(filteredSortedRows);
-  return items;
-}
-
-function applyBulkChanges() {
-  if (!state.contests.length) {
-    setStatus("Carregue contests antes de aplicar alteracoes em massa.", true);
-    return;
-  }
-
-  const startRaw = els.bulkStart?.value || "";
-  const endRaw = els.bulkEnd?.value || "";
-  const enabledMode = els.bulkEnabled?.value || "keep";
-  const scope = els.bulkScope?.value || "page";
-
-  const hasStartChange = Boolean(startRaw);
-  const hasEndChange = Boolean(endRaw);
-  const hasEnabledChange = enabledMode !== "keep";
-
-  if (!hasStartChange && !hasEndChange && !hasEnabledChange) {
-    setStatus("Defina ao menos um valor para aplicar em massa.", true);
-    return;
-  }
-
-  const startIso = hasStartChange ? parseDateInputToIso(startRaw) : null;
-  const endIso = hasEndChange ? parseDateInputToIso(endRaw) : null;
-
-  if (hasStartChange && !startIso) {
-    setStatus("Data de inicio invalida na aplicacao em massa.", true);
-    return;
-  }
-
-  if (hasEndChange && !endIso) {
-    setStatus("Data de fim invalida na aplicacao em massa.", true);
-    return;
-  }
-
-  const targetRows = getBulkTargetRows(scope);
-  if (!targetRows.length) {
-    setStatus("Nenhum contest alvo para aplicacao em massa com os filtros atuais.", true);
-    return;
-  }
-
-  let changedCount = 0;
-  targetRows.forEach((row) => {
-    if (hasStartChange) row.startEdit = startIso;
-    if (hasEndChange) row.endEdit = endIso;
-    if (hasEnabledChange) row.enabledEdit = enabledMode === "enable";
-    row.saveResult = "";
-    if (isRowChanged(row)) changedCount += 1;
-  });
-
-  renderContestTable();
-  setStatus(`Aplicacao em massa concluida em ${targetRows.length} contest(s). ${changedCount} estao alterados para salvar.`);
-}
-
-async function saveChangedContests() {
-  const changedRows = getChangedRows();
-  if (!changedRows.length) {
-    setStatus("Nenhuma alteracao pendente para salvar.");
-    return;
-  }
-
-  changedRows.forEach((row) => {
-    row.saveResult = "Pendente";
-  });
-
-  if (els.saveChangedBtn) els.saveChangedBtn.disabled = true;
-  if (els.loadBtn) els.loadBtn.disabled = true;
-  renderContestTable();
-  setStatus(`Salvando ${changedRows.length} contest(s) alterado(s)...`);
-
-  let success = 0;
-  const failures = [];
-
-  for (const row of changedRows) {
-    try {
-      await updateContest(row.id, row.startEdit, row.endEdit, row.enabledEdit);
-      row.startOriginal = row.startEdit;
-      row.endOriginal = row.endEdit;
-      row.enabledOriginal = row.enabledEdit;
-      row.saveResult = "Salvo";
-      success += 1;
-    } catch (error) {
-      const reason = String(error?.message || "erro desconhecido");
-      row.saveResult = `Erro: ${reason}`;
-      failures.push(`${row.title} (${row.id}): ${reason}`);
-    }
-  }
-
-  if (failures.length) {
-    setStatus(`Salvos: ${success}. Falhas: ${failures.length}. Primeira falha: ${failures[0]}`, true);
-  } else {
-    setStatus(`Todos os ${success} contest(s) alterados foram salvos.`);
-  }
-
-  if (els.loadBtn) els.loadBtn.disabled = false;
-  renderContestTable();
-}
-
-async function loadContests() {
-  state.apiBase = els.apiBase?.value?.trim() || state.apiBase;
-  state.apiUser = els.apiUser?.value?.trim() || "";
-  state.apiPassword = els.apiPassword?.value || "";
-
-  if (els.loadBtn) els.loadBtn.disabled = true;
-  setStatus("Carregando contests...");
-
-  try {
-    let contests;
-    try {
-      contests = await apiFetch("contests?onlyActive=false");
-    } catch (error) {
-      const maybeUnsupportedParam = /Falha API \((400|404)\)/.test(String(error?.message || ""));
-      if (!maybeUnsupportedParam) throw error;
-      contests = await apiFetch("contests");
+    if (!newStart && !newEnd && enabledMode === "keep") {
+      showToast("Preencha ao menos um campo para aplicar em lote.", "warning");
+      return;
     }
 
-    const manualIds = parseContestIdList(els.extraContestIds?.value || "");
-    const extraContests = [];
-    const failedIds = [];
-
-    for (const cid of manualIds) {
-      try {
-        const contest = await apiFetch(`contests/${encodeURIComponent(cid)}`);
-        if (contest && typeof contest === "object") {
-          extraContests.push(contest);
-        }
-      } catch (_error) {
-        failedIds.push(cid);
-      }
-    }
-
-    contests = mergeContestsById(contests, extraContests);
-
-    if (!Array.isArray(contests)) {
-      throw new Error("Resposta da API invalida para contests.");
-    }
-
-    state.contests = contests
-      .slice()
-      .sort((a, b) => getContestTitle(a).localeCompare(getContestTitle(b), "pt-BR"))
-      .map(buildContestRow);
-    state.page = 1;
-
-    renderContestTable();
-    if (manualIds.length && failedIds.length) {
-      setStatus(`${state.contests.length} contest(s) carregado(s). IDs sem acesso/encontrados: ${failedIds.join(", ")}.`, true);
-    } else if (!manualIds.length) {
-      setStatus(`${state.contests.length} contest(s) carregado(s). Se faltarem contests desabilitados, informe os IDs no campo opcional.`);
+    let targetItems = [];
+    if (scope === "page") {
+      const filtered = getFilteredContests();
+      const sorted = getSortedContests(filtered);
+      const startIdx = (state.page - 1) * state.pageSize;
+      targetItems = sorted.slice(startIdx, startIdx + state.pageSize);
     } else {
-      setStatus(`${state.contests.length} contest(s) carregado(s), incluindo IDs extras solicitados.`);
+      targetItems = getFilteredContests();
     }
-  } catch (error) {
-    state.contests = [];
-    els.list.innerHTML = "";
-    setStatus(`Erro ao carregar contests: ${error.message}`, true);
-    updateBulkInfo();
-    updatePaginationUi(0, 1, 0, 0);
-  } finally {
-    if (els.loadBtn) els.loadBtn.disabled = false;
+
+    if (targetItems.length === 0) {
+      showToast("Nenhum contest selecionado para aplicar alterações.", "warning");
+      return;
+    }
+
+    targetItems.forEach((item) => {
+      if (newStart) item.draft.start = newStart;
+      if (newEnd) item.draft.end = newEnd;
+      if (enabledMode === "enable") item.draft.enabled = true;
+      if (enabledMode === "disable") item.draft.enabled = false;
+    });
+
+    renderTable();
+    updateKpis();
+    showToast(`Alterações aplicadas a ${targetItems.length} contest(s). Lembre-se de salvar!`, "success");
   }
-}
 
-if (els.loadBtn) {
-  els.loadBtn.addEventListener("click", loadContests);
-}
+  // --------------------------------------------------------------------------
+  // SALVAR ALTERAÇÕES PENDENTES NA API
+  // --------------------------------------------------------------------------
+  async function saveChangedContests() {
+    const creds = window.getApiCredentials ? window.getApiCredentials() : null;
+    if (!creds || !creds.apiBase) {
+      showToast("Sessão da API não disponível.", "error");
+      return;
+    }
 
-if (els.saveChangedBtn) {
-  els.saveChangedBtn.addEventListener("click", saveChangedContests);
-}
+    const changedItems = state.contests.filter(isContestChanged);
+    if (changedItems.length === 0) {
+      showToast("Não há alterações pendentes para salvar.", "info");
+      return;
+    }
 
-if (els.filterText) {
-  els.filterText.addEventListener("input", () => {
-    state.filterText = els.filterText.value || "";
-    state.page = 1;
-    renderContestTable();
-  });
-}
+    try {
+      showToast(`Salvando ${changedItems.length} contest(s) no DOMjudge...`, "info");
+      els.saveChangedBtn.disabled = true;
 
-if (els.filterEnabled) {
-  els.filterEnabled.addEventListener("change", () => {
-    state.filterEnabled = els.filterEnabled.value || "all";
-    state.page = 1;
-    renderContestTable();
-  });
-}
+      const headers = {
+        "Content-Type": "application/json",
+      };
+      if (creds.user && creds.password) {
+        headers["Authorization"] = `Basic ${btoa(`${creds.user}:${creds.password}`)}`;
+      }
 
-if (els.filterChanged) {
-  els.filterChanged.addEventListener("change", () => {
-    state.filterChanged = els.filterChanged.value || "all";
-    state.page = 1;
-    renderContestTable();
-  });
-}
+      let successCount = 0;
+      let errorCount = 0;
 
-if (els.pageSize) {
-  els.pageSize.addEventListener("change", () => {
-    const next = Number(els.pageSize.value || 15);
-    state.pageSize = Number.isFinite(next) && next > 0 ? next : 15;
-    state.page = 1;
-    renderContestTable();
-  });
-}
+      for (const item of changedItems) {
+        try {
+          const form = new URLSearchParams();
+          form.append("id", String(item.id));
+          if (item.draft.start) {
+            form.append("start_time", item.draft.start);
+          }
+          form.append("force", "true");
 
-if (els.prevPageBtn) {
-  els.prevPageBtn.addEventListener("click", () => {
-    state.page = Math.max(1, state.page - 1);
-    renderContestTable();
-  });
-}
+          const res = await fetch(`${creds.apiBase}/contests/${encodeURIComponent(item.id)}`, {
+            method: "PATCH",
+            headers: {
+              ...headers,
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: form.toString(),
+          });
 
-if (els.nextPageBtn) {
-  els.nextPageBtn.addEventListener("click", () => {
-    state.page += 1;
-    renderContestTable();
-  });
-}
+          if (!res.ok && res.status !== 204) {
+            const errTxt = await res.text().catch(() => "");
+            throw new Error(`HTTP ${res.status}: ${errTxt}`);
+          }
 
-if (els.applyBulkBtn) {
-  els.applyBulkBtn.addEventListener("click", applyBulkChanges);
-}
+          // Atualizar estado original após sucesso
+          item.orig.start = item.draft.start;
+          item.orig.end = item.draft.end;
+          item.orig.enabled = item.draft.enabled;
+          successCount += 1;
+        } catch (err) {
+          console.error(`Erro ao atualizar contest ${item.id}:`, err);
+          errorCount += 1;
+        }
+      }
 
-setStatus("Preencha API base, usuario e senha para carregar contests.");
-updateBulkInfo();
-updatePaginationUi(0, 1, 0, 0);
+      renderTable();
+      updateKpis();
+
+      if (errorCount === 0) {
+        showToast(`${successCount} contest(s) atualizados com sucesso!`, "success");
+      } else {
+        showToast(`${successCount} salvos, ${errorCount} falharam.`, "warning");
+      }
+    } catch (err) {
+      showToast(`Erro ao salvar alterações: ${err.message}`, "error");
+    } finally {
+      els.saveChangedBtn.disabled = state.contests.filter(isContestChanged).length === 0;
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // INICIALIZAÇÃO
+  // --------------------------------------------------------------------------
+  function init() {
+    if (els.loadBtn) els.loadBtn.addEventListener("click", loadContests);
+    if (els.saveChangedBtn) els.saveChangedBtn.addEventListener("click", saveChangedContests);
+    if (els.applyBulkBtn) els.applyBulkBtn.addEventListener("click", applyBulkChanges);
+
+    if (els.filterText) {
+      els.filterText.addEventListener("input", (e) => {
+        state.filterText = e.target.value;
+        state.page = 1;
+        renderTable();
+      });
+    }
+
+    if (els.filterEnabled) {
+      els.filterEnabled.addEventListener("change", (e) => {
+        state.filterEnabled = e.target.value;
+        state.page = 1;
+        renderTable();
+      });
+    }
+
+    if (els.filterChanged) {
+      els.filterChanged.addEventListener("change", (e) => {
+        state.filterChanged = e.target.value;
+        state.page = 1;
+        renderTable();
+      });
+    }
+
+    if (els.pageSize) {
+      els.pageSize.addEventListener("change", (e) => {
+        state.pageSize = parseInt(e.target.value, 10) || 100;
+        state.page = 1;
+        renderTable();
+      });
+    }
+
+    if (els.prevPageBtn) {
+      els.prevPageBtn.addEventListener("click", () => {
+        if (state.page > 1) {
+          state.page -= 1;
+          renderTable();
+        }
+      });
+    }
+
+    if (els.nextPageBtn) {
+      els.nextPageBtn.addEventListener("click", () => {
+        state.page += 1;
+        renderTable();
+      });
+    }
+
+    // Ordenação
+    document.querySelectorAll('#view-contests .th-sort-btn[data-sort]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sortKey = btn.getAttribute("data-sort");
+        if (state.sortKey === sortKey) {
+          state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+        } else {
+          state.sortKey = sortKey;
+          state.sortDir = "asc";
+        }
+        renderTable();
+      });
+    });
+  }
+
+  return { init, loadContests, renderTable };
+})();
+
+document.addEventListener("DOMContentLoaded", () => {
+  ContestManagerModule.init();
+});

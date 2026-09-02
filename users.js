@@ -1,1245 +1,1379 @@
-const state = {
-  apiBase: "https://coderunner.cin.ufpe.br/api/v4",
-  apiUser: "",
-  apiPassword: "",
-  users: [],
-  teamsMap: new Map(),
-  categoriesMap: new Map(),
-  originalUsersMap: new Map(),
-  selectedUserIds: new Set(),
-  filterText: "",
-  filterCategory: "all",
-  filterLabel: "all",
-  filterRole: "all",
-  filterEnabled: "all",
-  sortKey: "username",
-  sortDir: "asc",
-  page: 1,
-  pageSize: 15,
-};
+// ============================================================================
+// DOMJUDGE WIZARD - GERENCIADOR DE USUÁRIOS E TIMES (SPA MODULE)
+// ============================================================================
 
-const els = {
-  apiBase: document.getElementById("usersApiBase"),
-  apiUser: document.getElementById("usersApiUser"),
-  apiPassword: document.getElementById("usersApiPassword"),
-  loadUsersBtn: document.getElementById("loadUsersBtn"),
-  loadDemoUsersBtn: document.getElementById("loadDemoUsersBtn"),
-  status: document.getElementById("usersStatus"),
-  
-  // Filters
-  filterText: document.getElementById("usersFilterText"),
-  filterCategory: document.getElementById("usersFilterCategory"),
-  filterLabel: document.getElementById("usersFilterLabel"),
-  filterRole: document.getElementById("usersFilterRole"),
-  filterEnabled: document.getElementById("usersFilterEnabled"),
-
-  // Bulk actions
-  bulkScope: document.getElementById("bulkScope"),
-  bulkCategory: document.getElementById("bulkCategory"),
-  bulkLabels: document.getElementById("bulkLabels"),
-  bulkLabelsMode: document.getElementById("bulkLabelsMode"),
-  bulkEnabled: document.getElementById("bulkEnabled"),
-  applyBulkBtn: document.getElementById("applyBulkBtn"),
-
-  // Data lists & buttons
-  categoryDataList: document.getElementById("categoryDataList"),
-  saveChangesBtn: document.getElementById("saveChangesBtn"),
-  exportUsersCsvBtn: document.getElementById("exportUsersCsvBtn"),
-  changedHint: document.getElementById("changedHint"),
-
-  // Pagination
-  pageSize: document.getElementById("usersPageSize"),
-  prevPageBtn: document.getElementById("prevPageBtn"),
-  nextPageBtn: document.getElementById("nextPageBtn"),
-  pageLabel: document.getElementById("pageLabel"),
-  pageStats: document.getElementById("pageStats"),
-
-  // Table
-  selectAllCheckbox: document.getElementById("selectAllCheckbox"),
-  tableBody: document.getElementById("usersTableBody"),
-
-  // Create Modal
-  openCreateModalBtn: document.getElementById("openCreateModalBtn"),
-  createModal: document.getElementById("createModal"),
-  closeCreateModalBtn: document.getElementById("closeCreateModalBtn"),
-  tabSingleBtn: document.getElementById("tabSingleBtn"),
-  tabBatchBtn: document.getElementById("tabBatchBtn"),
-  createSingleForm: document.getElementById("createSingleForm"),
-  createBatchContainer: document.getElementById("createBatchContainer"),
-  cancelCreateSingleBtn: document.getElementById("cancelCreateSingleBtn"),
-  cancelCreateBatchBtn: document.getElementById("cancelCreateBatchBtn"),
-  processBatchBtn: document.getElementById("processBatchBtn"),
-  batchInputText: document.getElementById("batchInputText"),
-  batchDefaultCategory: document.getElementById("batchDefaultCategory"),
-  batchDefaultLabels: document.getElementById("batchDefaultLabels"),
-  batchFeedback: document.getElementById("batchFeedback"),
-  createHasTeam: document.getElementById("createHasTeam"),
-  batchHasTeam: document.getElementById("batchHasTeam"),
-  createCategory: document.getElementById("createCategory"),
-  createLabels: document.getElementById("createLabels"),
-
-  // Edit Modal
-  editModal: document.getElementById("editModal"),
-  closeEditModalBtn: document.getElementById("closeEditModalBtn"),
-  editSingleForm: document.getElementById("editSingleForm"),
-  editUserTitle: document.getElementById("editUserTitle"),
-  cancelEditModalBtn: document.getElementById("cancelEditModalBtn"),
-  editHasTeam: document.getElementById("editHasTeam"),
-  editCategory: document.getElementById("editCategory"),
-  editLabels: document.getElementById("editLabels"),
-};
-
-function sanitize(text) {
-  return String(text ?? "").replace(/[<>]/g, "");
-}
-
-function setStatus(message, isError = false) {
-  if (!els.status) return;
-  els.status.textContent = message;
-  els.status.style.color = isError ? "#b91c1c" : "var(--muted)";
-}
-
-function normalizeApiBase(url) {
-  const cleaned = String(url || "").trim().replace(/\/+$/, "");
-  if (cleaned.endsWith("/api/v4") || cleaned.endsWith("/api")) return cleaned;
-  return `${cleaned}/api/v4`;
-}
-
-function buildBasicAuthHeader(user, password) {
-  return `Basic ${btoa(`${user}:${password}`)}`;
-}
-
-function parseLabelsInput(value) {
-  if (!value) return [];
-  if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean);
-  return String(value)
-    .split(/[,;]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function formatLabelsString(labels) {
-  if (!labels || !Array.isArray(labels)) return "";
-  return labels.join(", ");
-}
-
-function copyUserObject(user) {
-  return {
-    ...user,
-    labels: Array.isArray(user.labels) ? [...user.labels] : [],
-    roles: Array.isArray(user.roles) ? [...user.roles] : [],
-  };
-}
-
-function isUserChanged(user) {
-  if (user.isNew) return true;
-  const original = state.originalUsersMap.get(String(user.id));
-  if (!original) return false;
-
-  if (user.username !== original.username) return true;
-  if (user.name !== original.name) return true;
-  if ((user.email || "") !== (original.email || "")) return true;
-  if (Boolean(user.enabled) !== Boolean(original.enabled)) return true;
-  if (Boolean(user.hasTeam) !== Boolean(original.hasTeam)) return true;
-  if (user.password) return true;
-
-  const currentRoles = [...(user.roles || [])].sort().join(",");
-  const origRoles = [...(original.roles || [])].sort().join(",");
-  if (currentRoles !== origRoles) return true;
-
-  if (user.hasTeam) {
-    if ((user.category || "") !== (original.category || "")) return true;
-    const currentLabels = [...(user.labels || [])].sort().join(",");
-    const origLabels = [...(original.labels || [])].sort().join(",");
-    if (currentLabels !== origLabels) return true;
-  }
-
-  return false;
-}
-
-function generateDemoUsers() {
-  const demoUsers = [
-    { id: "101", username: "ana.souza", name: "Ana Souza", email: "ana.souza@cin.ufpe.br", category: "Estudantes", labels: ["turma-a", "2026-1"], roles: ["team"], enabled: true, hasTeam: true, team_id: "t101" },
-    { id: "102", username: "bruno.lima", name: "Bruno Lima", email: "bruno.lima@cin.ufpe.br", category: "Estudantes", labels: ["turma-a", "vip"], roles: ["team"], enabled: true, hasTeam: true, team_id: "t102" },
-    { id: "103", username: "carla.mendes", name: "Carla Mendes", email: "carla.mendes@cin.ufpe.br", category: "Estudantes", labels: ["turma-b"], roles: ["team"], enabled: true, hasTeam: true, team_id: "t103" },
-    { id: "104", username: "diego.alves", name: "Diego Alves", email: "diego.alves@cin.ufpe.br", category: "Monitores", labels: ["monitor", "2026-1"], roles: ["team", "jury"], enabled: true, hasTeam: true, team_id: "t104" },
-    { id: "105", username: "elena.ferreira", name: "Elena Ferreira", email: "elena.ferreira@cin.ufpe.br", category: "Competidores", labels: ["fase-1", "vip"], roles: ["team"], enabled: true, hasTeam: true, team_id: "t105" },
-    { id: "106", username: "fabricio.costa", name: "Fabrício Costa", email: "fabricio.costa@cin.ufpe.br", category: "", labels: [], roles: ["jury", "admin"], enabled: true, hasTeam: false, team_id: null },
-    { id: "107", username: "gabriela.rocha", name: "Gabriela Rocha", email: "gabriela.rocha@cin.ufpe.br", category: "Estudantes", labels: ["turma-b"], roles: ["team"], enabled: false, hasTeam: true, team_id: "t107" },
-    { id: "108", username: "heitor.oliveira", name: "Heitor Oliveira", email: "heitor.oliveira@cin.ufpe.br", category: "Competidores", labels: ["fase-1"], roles: ["team"], enabled: true, hasTeam: true, team_id: "t108" },
-  ];
-
-  state.users = demoUsers.map((u) => ({
-    ...u,
-    isNew: false,
-    saveResult: null,
-  }));
-
-  state.originalUsersMap = new Map();
-  state.users.forEach((u) => {
-    state.originalUsersMap.set(String(u.id), copyUserObject(u));
-  });
-
-  state.selectedUserIds.clear();
-  state.page = 1;
-
-  populateFilterDropdowns();
-  renderUserTable();
-  setStatus(`Carregados ${state.users.length} usuarios de exemplo para demonstracao.`);
-}
-
-async function apiFetch(path, options = {}) {
-  const apiBase = normalizeApiBase(state.apiBase);
-  const user = String(state.apiUser || "").trim();
-  const password = state.apiPassword || "";
-
-  if (!apiBase || !user || !password) {
-    throw new Error("Preencha API base, usuario e senha.");
-  }
-
-  const headers = {
-    Accept: "application/json",
-    Authorization: buildBasicAuthHeader(user, password),
-    ...(options.headers || {}),
+const UsersModule = (() => {
+  const state = {
+    users: [],
+    teamsMap: new Map(),
+    categoriesMap: new Map(),
+    originalUsersMap: new Map(),
+    selectedUserIds: new Set(),
+    filterText: "",
+    filterCategory: "all",
+    filterLabel: "",
+    filterRole: "all",
+    filterEnabled: "all",
+    sortKey: "username",
+    sortDir: "asc",
+    page: 1,
+    pageSize: 100,
   };
 
-  // If body is FormData, do NOT set Content-Type header so fetch sets boundary automatically
-  if (options.body instanceof FormData) {
-    delete headers["Content-Type"];
+  const els = {
+    loadUsersBtn: document.getElementById("loadUsersBtn"),
+    filterText: document.getElementById("usersFilterText"),
+    filterCategory: document.getElementById("usersFilterCategory"),
+    filterLabel: document.getElementById("usersFilterLabel"),
+    labelsFilterDataList: document.getElementById("labelsFilterDataList"),
+    filterRole: document.getElementById("usersFilterRole"),
+    filterEnabled: document.getElementById("usersFilterEnabled"),
+
+    bulkScope: document.getElementById("bulkScope"),
+    bulkCategory: document.getElementById("bulkCategory"),
+    bulkLabels: document.getElementById("bulkLabels"),
+    bulkLabelsMode: document.getElementById("bulkLabelsMode"),
+    bulkEnabled: document.getElementById("bulkEnabled"),
+    applyBulkBtn: document.getElementById("applyBulkBtn"),
+
+    categoryDataList: document.getElementById("categoryDataList"),
+    saveChangesBtn: document.getElementById("saveChangesBtn"),
+    exportUsersCsvBtn: document.getElementById("exportUsersCsvBtn"),
+    changedHint: document.getElementById("changedHint"),
+
+    pageSize: document.getElementById("usersPageSize"),
+    prevPageBtn: document.getElementById("prevPageBtn"),
+    nextPageBtn: document.getElementById("nextPageBtn"),
+    pageLabel: document.getElementById("pageLabel"),
+    pageStats: document.getElementById("pageStats"),
+
+    selectAllCheckbox: document.getElementById("selectAllCheckbox"),
+    tableBody: document.getElementById("usersTableBody"),
+
+    // KPI Cards
+    kpiTotal: document.getElementById("kpiUsersTotal"),
+    kpiActive: document.getElementById("kpiUsersActive"),
+    kpiCategories: document.getElementById("kpiUsersCategories"),
+    kpiTeams: document.getElementById("kpiUsersTeams"),
+
+    // Create Modal
+    openCreateModalBtn: document.getElementById("openCreateModalBtn"),
+    createModal: document.getElementById("createModal"),
+    closeCreateModalBtn: document.getElementById("closeCreateModalBtn"),
+    tabSingleBtn: document.getElementById("tabSingleBtn"),
+    tabBatchBtn: document.getElementById("tabBatchBtn"),
+    createSingleContainer: document.getElementById("createSingleContainer"),
+    createSingleForm: document.getElementById("createSingleForm"),
+    createBatchContainer: document.getElementById("createBatchContainer"),
+    downloadBatchTemplateCsvBtn: document.getElementById("downloadBatchTemplateCsvBtn"),
+    downloadBatchTemplateTsvBtn: document.getElementById("downloadBatchTemplateTsvBtn"),
+    batchFileInput: document.getElementById("batchFileInput"),
+    cancelCreateSingleBtn: document.getElementById("cancelCreateSingleBtn"),
+    cancelCreateBatchBtn: document.getElementById("cancelCreateBatchBtn"),
+    processBatchBtn: document.getElementById("processBatchBtn"),
+    batchInputText: document.getElementById("batchInputText"),
+    batchDefaultCategory: document.getElementById("batchDefaultCategory"),
+    batchDefaultLabels: document.getElementById("batchDefaultLabels"),
+    batchFeedback: document.getElementById("batchFeedback"),
+    batchPreviewBody: document.getElementById("batchPreviewBody"),
+    batchCountBadge: document.getElementById("batchCountBadge"),
+    createHasTeam: document.getElementById("createHasTeam"),
+    batchHasTeam: document.getElementById("batchHasTeam"),
+    createCategory: document.getElementById("createCategory"),
+    createLabels: document.getElementById("createLabels"),
+    createCategoryField: document.getElementById("createCategoryField"),
+    createLabelsField: document.getElementById("createLabelsField"),
+
+    // Edit Modal
+    editModal: document.getElementById("editModal"),
+    closeEditModalBtn: document.getElementById("closeEditModalBtn"),
+    editSingleForm: document.getElementById("editSingleForm"),
+    editUserTitle: document.getElementById("editUserTitle"),
+    cancelEditModalBtn: document.getElementById("cancelEditModalBtn"),
+    editUserId: document.getElementById("editUserId"),
+    editUsername: document.getElementById("editUsername"),
+    editName: document.getElementById("editName"),
+    editEmail: document.getElementById("editEmail"),
+    editPassword: document.getElementById("editPassword"),
+    editHasTeam: document.getElementById("editHasTeam"),
+    editCategory: document.getElementById("editCategory"),
+    editLabels: document.getElementById("editLabels"),
+    editEnabled: document.getElementById("editEnabled"),
+    editCategoryField: document.getElementById("editCategoryField"),
+    editLabelsField: document.getElementById("editLabelsField"),
+  };
+
+  function showToast(msg, type = "info") {
+    if (window.showToast) {
+      window.showToast(msg, type);
+    } else {
+      console.log(`[${type}] ${msg}`);
+    }
   }
 
-  const response = await fetch(`${apiBase}/${String(path || "").replace(/^\/+/, "")}`, {
-    ...options,
-    headers,
-  });
+  function sanitize(text) {
+    return String(text ?? "").replace(/[<>]/g, "");
+  }
 
-  if (!response.ok) {
-    const text = await response.text();
-    let detailMessage = text;
+  function isUserChanged(user) {
+    const orig = state.originalUsersMap.get(user.id);
+    if (!orig) return true; // Novo usuário não salvo
+
+    const origRoles = (orig.roles || []).slice().sort().join(",");
+    const currRoles = (user.roles || []).slice().sort().join(",");
+    const origLabels = (orig.teamLabels || []).slice().sort().join(",");
+    const currLabels = (user.teamLabels || []).slice().sort().join(",");
+
+    return (
+      user.name !== orig.name ||
+      user.username !== orig.username ||
+      user.email !== orig.email ||
+      user.enabled !== orig.enabled ||
+      user.hasTeam !== orig.hasTeam ||
+      user.teamCategory !== orig.teamCategory ||
+      currLabels !== origLabels ||
+      currRoles !== origRoles ||
+      Boolean(user.password)
+    );
+  }
+
+  function updateKpis() {
+    const total = state.users.length;
+    const active = state.users.filter((u) => Boolean(u.enabled)).length;
+    const categories = new Set(
+      state.users.map((u) => u.teamCategory).filter(Boolean)
+    ).size;
+    const teams = state.users.filter((u) => Boolean(u.hasTeam)).length;
+    const changed = state.users.filter(isUserChanged).length;
+
+    if (els.kpiTotal) els.kpiTotal.textContent = total;
+    if (els.kpiActive) els.kpiActive.textContent = active;
+    if (els.kpiCategories) els.kpiCategories.textContent = categories;
+    if (els.kpiTeams) els.kpiTeams.textContent = teams;
+
+    if (els.saveChangesBtn) els.saveChangesBtn.disabled = changed === 0;
+    if (els.changedHint) {
+      els.changedHint.textContent = changed > 0
+        ? `${changed} usuário(s) com alterações pendentes.`
+        : "Nenhuma alteração pendente.";
+      els.changedHint.style.color = changed > 0 ? "var(--brand)" : "var(--ink-muted)";
+    }
+
+    if (els.bulkScope) {
+      const optSelected = els.bulkScope.querySelector('option[value="selected"]');
+      if (optSelected) {
+        optSelected.textContent = `Selecionados (${state.selectedUserIds.size})`;
+      }
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // CARREGAR DADOS DA API
+  // --------------------------------------------------------------------------
+  async function loadUsers() {
+    const creds = window.getApiCredentials ? window.getApiCredentials() : null;
+    if (!creds || !creds.apiBase) {
+      showToast("Sessão da API não disponível.", "error");
+      return;
+    }
+
     try {
-      const parsed = JSON.parse(text);
-      if (parsed.message) {
-        detailMessage = parsed.message;
-      } else if (parsed.error) {
-        detailMessage = parsed.error;
-      } else if (parsed.detail) {
-        detailMessage = parsed.detail;
+      showToast("Carregando usuários e times do DOMjudge...", "info");
+      if (els.tableBody) {
+        els.tableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 24px; color: var(--ink-muted);">Carregando usuários...</td></tr>`;
       }
-      if (parsed.errors) {
-        const errStr = typeof parsed.errors === "object" ? JSON.stringify(parsed.errors) : String(parsed.errors);
-        detailMessage += ` (${errStr})`;
+
+      const headers = {};
+      if (creds.user && creds.password) {
+        headers["Authorization"] = `Basic ${btoa(`${creds.user}:${creds.password}`)}`;
       }
-    } catch (e) {}
-    throw new Error(`Falha API (${response.status}): ${detailMessage || "Erro desconhecido"}`);
+
+      // Buscar Contests, Grupos, Times e Usuários em paralelo
+      const [contestsRes, groupsFallbackRes, teamsRes, usersRes] = await Promise.all([
+        fetch(`${creds.apiBase}/contests`, { headers }).catch(() => null),
+        fetch(`${creds.apiBase}/groups`, { headers }).catch(() => null),
+        fetch(`${creds.apiBase}/teams`, { headers }).catch(() => null),
+        fetch(`${creds.apiBase}/users`, { headers }),
+      ]);
+
+      if (!usersRes.ok) {
+        throw new Error(`API HTTP ${usersRes.status}: ${usersRes.statusText}`);
+      }
+
+      const rawContests = contestsRes && contestsRes.ok ? await contestsRes.json().catch(() => []) : [];
+      const rawGroupsFallback = groupsFallbackRes && groupsFallbackRes.ok ? await groupsFallbackRes.json().catch(() => []) : [];
+      const rawTeams = teamsRes && teamsRes.ok ? await teamsRes.json().catch(() => []) : [];
+      const rawUsers = await usersRes.json();
+
+      state.categoriesMap.clear();
+
+      // Mapear grupos do fallback se existirem
+      if (Array.isArray(rawGroupsFallback)) {
+        rawGroupsFallback.forEach((g) => state.categoriesMap.set(String(g.id), g.name || g.id));
+      }
+
+      // Buscar grupos específicos de cada contest (padrão DOMjudge v4)
+      if (Array.isArray(rawContests)) {
+        for (const c of rawContests) {
+          const cId = c.id || c.cid;
+          const contestGroups = await fetch(`${creds.apiBase}/contests/${encodeURIComponent(cId)}/groups`, { headers })
+            .then((r) => (r.ok ? r.json() : []))
+            .catch(() => []);
+
+          if (Array.isArray(contestGroups)) {
+            contestGroups.forEach((g) => state.categoriesMap.set(String(g.id), g.name || g.id));
+          }
+        }
+      }
+
+      state.teamsMap.clear();
+      rawTeams.forEach((t) => {
+        // Resolver categoria através dos group_ids ou category_id
+        let catName = "";
+        if (Array.isArray(t.group_ids) && t.group_ids.length > 0) {
+          catName = t.group_ids.map((gid) => state.categoriesMap.get(String(gid)) || gid).join(", ");
+        } else if (t.category_id) {
+          catName = state.categoriesMap.get(String(t.category_id)) || String(t.category_id);
+        }
+
+        // Resolver labels (array ou string separada por vírgula no campo label)
+        let labels = [];
+        if (Array.isArray(t.labels)) {
+          labels = t.labels;
+        } else if (t.label) {
+          labels = String(t.label).split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+        }
+
+        state.teamsMap.set(String(t.id), {
+          id: t.id,
+          teamid: t.teamid,
+          name: t.name,
+          category: catName,
+          labels,
+        });
+      });
+
+      // Verificar usuários com função "team" que não possuem time cadastrado e criar automaticamente
+      const teamUsersMissingTeam = rawUsers.filter((u) => {
+        const roles = Array.isArray(u.roles) ? u.roles : (u.roles ? [u.roles] : ["team"]);
+        return roles.includes("team") && !u.team_id && !u.team;
+      });
+
+      if (teamUsersMissingTeam.length > 0) {
+        try {
+          const teamsPayload = teamUsersMissingTeam.map((u) => ({
+            id: u.username || String(u.id),
+            name: u.name || u.username,
+            group_ids: ["participants"],
+            organization_id: "UFPE",
+            label: "",
+          }));
+
+          const fdTeams = new FormData();
+          fdTeams.append(
+            "json",
+            new Blob([JSON.stringify(teamsPayload)], { type: "application/json" }),
+            "teams.json"
+          );
+          await fetch(`${creds.apiBase}/users/teams`, { method: "POST", headers, body: fdTeams }).catch(() => null);
+
+          const accountsPayload = teamUsersMissingTeam.map((u) => ({
+            type: "team",
+            name: u.name || u.username,
+            username: u.username,
+            email: u.email || null,
+            team_id: u.username || String(u.id),
+            roles: Array.isArray(u.roles) ? u.roles : ["team"],
+          }));
+
+          const fdAccounts = new FormData();
+          fdAccounts.append(
+            "json",
+            new Blob([JSON.stringify(accountsPayload)], { type: "application/json" }),
+            "accounts.json"
+          );
+          await fetch(`${creds.apiBase}/users/accounts`, { method: "POST", headers, body: fdAccounts }).catch(() => null);
+
+          // Atualizar os objetos locais em memória
+          teamUsersMissingTeam.forEach((u) => {
+            const tId = u.username || String(u.id);
+            u.team_id = tId;
+            u.team = u.name || u.username;
+            state.teamsMap.set(String(tId), {
+              id: tId,
+              teamid: tId,
+              name: u.name || u.username,
+              category: "Participants",
+              labels: [],
+            });
+          });
+        } catch (autoTeamErr) {
+          console.warn("Aviso ao auto-cadastrar times:", autoTeamErr);
+        }
+      }
+
+      state.originalUsersMap.clear();
+      state.users = rawUsers.map((u) => {
+        const teamObj = u.team_id ? state.teamsMap.get(String(u.team_id)) : null;
+        const mappedUser = {
+          id: String(u.id || u.username),
+          username: u.username || "",
+          name: u.name || u.username || "",
+          email: u.email || "",
+          enabled: Boolean(u.enabled ?? true),
+          roles: Array.isArray(u.roles) ? u.roles : (u.roles ? [u.roles] : ["team"]),
+          hasTeam: Boolean(u.team_id),
+          teamId: u.team_id || null,
+          teamCategory: teamObj ? teamObj.category : "",
+          teamLabels: teamObj ? teamObj.labels : [],
+          password: "",
+        };
+
+        state.originalUsersMap.set(mappedUser.id, JSON.parse(JSON.stringify(mappedUser)));
+        return mappedUser;
+      });
+
+      state.selectedUserIds.clear();
+      state.page = 1;
+      populateFilterDropdowns();
+      renderTable();
+      updateKpis();
+      showToast(`${state.users.length} usuários carregados com sucesso!`, "success");
+    } catch (err) {
+      if (err.message && (err.message.includes("401") || err.message.includes("403"))) {
+        if (window.handleApiUnauthorized) window.handleApiUnauthorized(err);
+      }
+      showToast(`Erro ao carregar usuários: ${err.message}`, "error");
+      if (els.tableBody) {
+        els.tableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 24px;">
+          <div>Erro ao carregar: ${sanitize(err.message)}</div>
+          ${(err.message && err.message.includes("401")) ? '<button type="button" class="primary btn-sm" style="margin-top: 10px;" onclick="window.handleApiUnauthorized && window.handleApiUnauthorized()">🔑 Renovar Token / Login</button>' : ''}
+        </td></tr>`;
+      }
+    }
   }
 
-  const raw = await response.text();
-  return raw.trim() ? JSON.parse(raw) : null;
-}
+  function loadDemoUsers() {
+    const demoCategories = ["Estudantes", "Professores / Jury", "Convidados"];
+    const demoUsers = [
+      { id: "1", username: "aluno01", name: "Ana Souza", email: "ana@cin.ufpe.br", enabled: true, roles: ["team"], hasTeam: true, teamCategory: "Estudantes", teamLabels: ["turma-a", "2026-1"] },
+      { id: "2", username: "aluno02", name: "Bruno Lima", email: "bruno@cin.ufpe.br", enabled: true, roles: ["team"], hasTeam: true, teamCategory: "Estudantes", teamLabels: ["turma-a"] },
+      { id: "3", username: "aluno03", name: "Carlos Mendes", email: "carlos@cin.ufpe.br", enabled: false, roles: ["team"], hasTeam: true, teamCategory: "Estudantes", teamLabels: ["turma-b"] },
+      { id: "4", username: "prof_carlos", name: "Prof. Carlos", email: "prof@cin.ufpe.br", enabled: true, roles: ["jury", "admin"], hasTeam: false, teamCategory: "Professores / Jury", teamLabels: [] },
+      { id: "5", username: "monitor01", name: "Lucas Monitor", email: "lucas@cin.ufpe.br", enabled: true, roles: ["jury"], hasTeam: false, teamCategory: "Professores / Jury", teamLabels: ["monitor"] },
+    ];
 
-async function loadUsersFromApi() {
-  try {
-    setStatus("Carregando usuarios, teams e grupos da API...");
-    state.apiBase = els.apiBase?.value || state.apiBase;
-    state.apiUser = els.apiUser?.value || state.apiUser;
-    state.apiPassword = els.apiPassword?.value || state.apiPassword;
-
-    // Fetch users, teams, and contests in parallel
-    const [usersRes, teamsRes, contestsRes] = await Promise.allSettled([
-      apiFetch("users"),
-      apiFetch("teams"),
-      apiFetch("contests"),
-    ]);
-
-    if (usersRes.status !== "fulfilled" || !Array.isArray(usersRes.value)) {
-      throw new Error("Resposta invalida da API ao carregar usuarios.");
-    }
-
-    const rawUsers = usersRes.value;
-    const rawTeams = teamsRes.status === "fulfilled" && Array.isArray(teamsRes.value) ? teamsRes.value : [];
-    const rawContests = contestsRes.status === "fulfilled" && Array.isArray(contestsRes.value) ? contestsRes.value : [];
-
-    // Map contest groups: ID -> Name & Name -> ID
-    const catIdToName = new Map();
-    state.categoriesMap = new Map();
-
-    if (rawContests.length > 0) {
-      const groupPromises = rawContests.map((c) => apiFetch(`contests/${encodeURIComponent(c.id)}/groups`).catch(() => []));
-      const groupsResults = await Promise.all(groupPromises);
-      groupsResults.forEach((groups) => {
-        if (Array.isArray(groups)) {
-          groups.forEach((g) => {
-            const id = String(g.id);
-            const name = String(g.name || g.id);
-            catIdToName.set(id, name);
-            state.categoriesMap.set(name.toLowerCase(), id);
-            state.categoriesMap.set(id, id);
-          });
-        }
-      });
-    }
-
-    // Map teams: ID -> Team object & Name -> Team object
-    state.teamsMap = new Map();
-    rawTeams.forEach((t) => {
-      const id = String(t.id);
-      state.teamsMap.set(id, t);
-      if (t.name) state.teamsMap.set(String(t.name).toLowerCase(), t);
-    });
-
-    state.users = rawUsers.map((item) => {
-      const id = String(item.id || item.username);
-      const roles = Array.isArray(item.roles) ? item.roles : (item.user_roles || ["team"]);
-
-      let team = null;
-      if (item.team_id && state.teamsMap.has(String(item.team_id))) {
-        team = state.teamsMap.get(String(item.team_id));
-      } else if (item.team && typeof item.team === "object") {
-        team = item.team;
-      } else if (item.team && typeof item.team === "string" && state.teamsMap.has(String(item.team))) {
-        team = state.teamsMap.get(String(item.team));
-      } else if (item.name && state.teamsMap.has(String(item.name).toLowerCase())) {
-        team = state.teamsMap.get(String(item.name).toLowerCase());
-      }
-
-      const hasTeam = Boolean(team || item.team_id);
-      let category = "";
-      let labels = [];
-
-      if (team) {
-        const catId = String(team.category_id || team.category || "");
-        category = catIdToName.get(catId) || catId || "";
-
-        if (team.label) {
-          labels = parseLabelsInput(team.label);
-        } else if (team.tags) {
-          labels = parseLabelsInput(team.tags);
-        } else if (team.public_name && team.public_name !== team.name) {
-          labels = parseLabelsInput(team.public_name);
-        }
-      } else if (hasTeam) {
-        category = String(item.category || item.team_category || "");
-        labels = parseLabelsInput(item.label || item.labels);
-      }
-
-      return {
-        id,
-        username: String(item.username || item.id || ""),
-        name: String(item.name || item.username || ""),
-        email: item.email || "",
-        roles,
-        enabled: item.enabled !== false,
-        hasTeam,
-        team_id: team ? String(team.id) : (item.team_id ? String(item.team_id) : null),
-        category,
-        labels,
-        isNew: false,
-        saveResult: null,
-      };
-    });
-
-    state.originalUsersMap = new Map();
-    state.users.forEach((u) => {
-      state.originalUsersMap.set(String(u.id), copyUserObject(u));
+    state.originalUsersMap.clear();
+    state.users = demoUsers.map((u) => {
+      state.originalUsersMap.set(u.id, JSON.parse(JSON.stringify(u)));
+      return { ...u, password: "" };
     });
 
     state.selectedUserIds.clear();
     state.page = 1;
-
     populateFilterDropdowns();
-    renderUserTable();
-    setStatus(`Sucesso! ${state.users.length} usuarios e seus teams/categorias foram carregados.`);
-  } catch (err) {
-    setStatus(`Erro ao carregar da API: ${err.message}`, true);
-  }
-}
-
-function getUniqueCategories() {
-  const cats = new Set();
-  state.users.forEach((u) => {
-    if (u.hasTeam && u.category && u.category.trim()) {
-      cats.add(u.category.trim());
-    }
-  });
-  return Array.from(cats).sort((a, b) => a.localeCompare(b, "pt-BR"));
-}
-
-function getUniqueLabels() {
-  const lbls = new Set();
-  state.users.forEach((u) => {
-    if (u.hasTeam && Array.isArray(u.labels)) {
-      u.labels.forEach((l) => {
-        if (l && l.trim()) lbls.add(l.trim());
-      });
-    }
-  });
-  return Array.from(lbls).sort((a, b) => a.localeCompare(b, "pt-BR"));
-}
-
-function getUniqueRoles() {
-  const rls = new Set();
-  state.users.forEach((u) => {
-    if (Array.isArray(u.roles)) {
-      u.roles.forEach((r) => {
-        if (r && r.trim()) rls.add(r.trim());
-      });
-    }
-  });
-  return Array.from(rls).sort((a, b) => a.localeCompare(b, "pt-BR"));
-}
-
-function populateFilterDropdowns() {
-  const currentCat = els.filterCategory?.value || "all";
-  const currentLbl = els.filterLabel?.value || "all";
-  const currentRole = els.filterRole?.value || "all";
-
-  if (els.filterCategory) {
-    const cats = getUniqueCategories();
-    els.filterCategory.innerHTML = `<option value="all">Todas as categorias (${cats.length})</option>` +
-      cats.map((c) => `<option value="${sanitize(c)}">${sanitize(c)}</option>`).join("");
-    els.filterCategory.value = cats.includes(currentCat) ? currentCat : "all";
+    renderTable();
+    updateKpis();
+    showToast("Dados de demonstração carregados com sucesso!", "info");
   }
 
-  if (els.filterLabel) {
-    const lbls = getUniqueLabels();
-    els.filterLabel.innerHTML = `<option value="all">Todas as labels (${lbls.length})</option>` +
-      lbls.map((l) => `<option value="${sanitize(l)}">${sanitize(l)}</option>`).join("");
-    els.filterLabel.value = lbls.includes(currentLbl) ? currentLbl : "all";
-  }
+  // --------------------------------------------------------------------------
+  // AVALIADOR DE EXPRESSÕES BOOLEANAS PARA LABELS (AND, OR, NOT, PARÊNTESES)
+  // --------------------------------------------------------------------------
+  function matchLabelsExpression(labels, query) {
+    if (!query || !query.trim() || query === "all") return true;
 
-  if (els.filterRole) {
-    const rls = getUniqueRoles();
-    els.filterRole.innerHTML = `<option value="all">Todas as roles (${rls.length})</option>` +
-      rls.map((r) => `<option value="${sanitize(r)}">${sanitize(r)}</option>`).join("");
-    els.filterRole.value = rls.includes(currentRole) ? currentRole : "all";
-  }
+    const normalizedLabels = (labels || []).map((l) => String(l).trim().toLowerCase());
 
-  if (els.categoryDataList) {
-    const cats = getUniqueCategories();
-    els.categoryDataList.innerHTML = cats.map((c) => `<option value="${sanitize(c)}"></option>`).join("");
-  }
-}
-
-function getFilteredUsers() {
-  const q = String(state.filterText || "").trim().toLowerCase();
-  const cat = state.filterCategory;
-  const lbl = state.filterLabel;
-  const role = state.filterRole;
-  const enabled = state.filterEnabled;
-
-  return state.users.filter((u) => {
-    if (q) {
-      const matchName = String(u.name || "").toLowerCase().includes(q);
-      const matchUser = String(u.username || "").toLowerCase().includes(q);
-      const matchEmail = String(u.email || "").toLowerCase().includes(q);
-      const matchId = String(u.id || "").toLowerCase().includes(q);
-      if (!matchName && !matchUser && !matchEmail && !matchId) return false;
-    }
-
-    if (cat !== "all") {
-      if (!u.hasTeam || String(u.category || "").trim() !== cat) return false;
-    }
-
-    if (lbl !== "all") {
-      if (!u.hasTeam) return false;
-      const userLabels = Array.isArray(u.labels) ? u.labels : [];
-      if (!userLabels.includes(lbl)) return false;
-    }
-
-    if (role !== "all") {
-      const userRoles = Array.isArray(u.roles) ? u.roles : [];
-      if (!userRoles.includes(role)) return false;
-    }
-
-    if (enabled === "enabled" && !u.enabled) return false;
-    if (enabled === "disabled" && u.enabled) return false;
-
-    return true;
-  });
-}
-
-function getSortedUsers(rows) {
-  const sorted = rows.slice().sort((a, b) => {
-    let valA = a[state.sortKey] ?? "";
-    let valB = b[state.sortKey] ?? "";
-
-    if (Array.isArray(valA)) valA = valA.join(", ");
-    if (Array.isArray(valB)) valB = valB.join(", ");
-
-    if (typeof valA === "boolean") valA = valA ? 1 : 0;
-    if (typeof valB === "boolean") valB = valB ? 1 : 0;
-
-    const cmp = String(valA).localeCompare(String(valB), "pt-BR", { numeric: true });
-    return state.sortDir === "asc" ? cmp : -cmp;
-  });
-
-  return sorted;
-}
-
-function paginateUsers(rows) {
-  const totalRows = rows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / state.pageSize));
-
-  if (state.page > totalPages) state.page = totalPages;
-  if (state.page < 1) state.page = 1;
-
-  const start = (state.page - 1) * state.pageSize;
-  const end = start + state.pageSize;
-  const items = rows.slice(start, end);
-
-  return {
-    items,
-    totalRows,
-    totalPages,
-    startIndex: start + 1,
-    endIndex: start + items.length,
-  };
-}
-
-function renderUserTable() {
-  const filtered = getFilteredUsers();
-  const sorted = getSortedUsers(filtered);
-  const { items, totalRows, totalPages, startIndex, endIndex } = paginateUsers(sorted);
-
-  // Update scope option label
-  if (els.bulkScope) {
-    const selectedOpt = els.bulkScope.querySelector('option[value="selected"]');
-    if (selectedOpt) {
-      selectedOpt.textContent = `Selecionados (${state.selectedUserIds.size})`;
-    }
-  }
-
-  // Update Changed count
-  const changedCount = state.users.filter(isUserChanged).length;
-  if (els.saveChangesBtn) {
-    els.saveChangesBtn.disabled = changedCount === 0;
-  }
-  if (els.changedHint) {
-    els.changedHint.textContent = changedCount > 0 ? `${changedCount} usuario(s) com alteraçoes pendentes.` : "Nenhuma alteraçao pendente.";
-  }
-
-  // Update Pagination Controls
-  if (els.prevPageBtn) els.prevPageBtn.disabled = state.page <= 1;
-  if (els.nextPageBtn) els.nextPageBtn.disabled = state.page >= totalPages;
-  if (els.pageLabel) els.pageLabel.textContent = `Pagina ${state.page} de ${totalPages}`;
-  if (els.pageStats) {
-    els.pageStats.textContent = totalRows === 0 ? "Mostrando 0 de 0" : `Mostrando ${startIndex}-${endIndex} de ${totalRows}`;
-  }
-
-  // Update Select All Checkbox state
-  if (els.selectAllCheckbox) {
-    const allPageSelected = items.length > 0 && items.every((u) => state.selectedUserIds.has(String(u.id)));
-    els.selectAllCheckbox.checked = allPageSelected;
-  }
-
-  if (!els.tableBody) return;
-
-  if (items.length === 0) {
-    els.tableBody.innerHTML = `
-      <tr>
-        <td colspan="9" class="manager-empty">Nenhum usuario encontrado com os filtros atuais.</td>
-      </tr>
-    `;
-    return;
-  }
-
-  els.tableBody.innerHTML = items
-    .map((user) => {
-      const isSelected = state.selectedUserIds.has(String(user.id));
-      const changed = isUserChanged(user);
-      
-      const categoryPill = user.hasTeam
-        ? (user.category ? `<span class="category-pill">${sanitize(user.category)}</span>` : '<span class="manager-sub">Sem categoria</span>')
-        : '<span class="manager-sub" title="Usuário sem Team">Sem Team</span>';
-      
-      const labelsPills = user.hasTeam
-        ? (Array.isArray(user.labels) && user.labels.length > 0
-            ? user.labels.map((l) => `<span class="tag-pill">${sanitize(l)}</span>`).join(" ")
-            : '<span class="manager-sub">-</span>')
-        : '<span class="manager-sub">-</span>';
-
-      const rolesPills = Array.isArray(user.roles) && user.roles.length > 0
-        ? user.roles.map((r) => `<span class="role-pill">${sanitize(r)}</span>`).join(" ")
-        : '<span class="manager-sub">team</span>';
-
-      const statusBadge = user.enabled
-        ? '<span class="badge" style="background:#dcfce7; color:#166534;">Ativo</span>'
-        : '<span class="badge dim" style="background:#fee2e2; color:#991b1b;">Inativo</span>';
-
-      return `
-        <tr class="${changed ? "changed" : ""}">
-          <td class="checkbox-col">
-            <input type="checkbox" class="user-select-cb" data-id="${sanitize(user.id)}" ${isSelected ? "checked" : ""} />
-          </td>
-          <td>
-            <strong>${sanitize(user.username)}</strong>
-            ${user.isNew ? '<br/><small class="badge" style="font-size:0.68rem; padding:1px 6px;">Novo</small>' : ""}
-          </td>
-          <td>${sanitize(user.name)}</td>
-          <td><small class="manager-sub">${sanitize(user.email || "-")}</small></td>
-          <td>${categoryPill}</td>
-          <td><div class="tag-list">${labelsPills}</div></td>
-          <td><div class="tag-list">${rolesPills}</div></td>
-          <td>${statusBadge}</td>
-          <td style="text-align: right;">
-            <button type="button" class="badge dim edit-user-btn" data-id="${sanitize(user.id)}">Editar</button>
-          </td>
-        </tr>
-      `;
-    })
-    .join("");
-
-  // Attach event listeners to row checkboxes and edit buttons
-  els.tableBody.querySelectorAll(".user-select-cb").forEach((cb) => {
-    cb.addEventListener("change", (e) => {
-      const id = String(e.target.dataset.id);
-      if (e.target.checked) {
-        state.selectedUserIds.add(id);
-      } else {
-        state.selectedUserIds.delete(id);
+    // Tokenize: aspas, parênteses, operadores lógicos, termos
+    const rawTokens = [];
+    const regex = /"([^"]+)"|'([^']+)'|([()])|(\bAND\b|\bOR\b|\bNOT\b|&&|\|\||!|[^\s()"'!]+)/gi;
+    let match;
+    while ((match = regex.exec(query)) !== null) {
+      if (match[1] !== undefined) {
+        rawTokens.push({ type: "TERM", value: match[1].toLowerCase() });
+      } else if (match[2] !== undefined) {
+        rawTokens.push({ type: "TERM", value: match[2].toLowerCase() });
+      } else if (match[3] !== undefined) {
+        rawTokens.push({ type: match[3] === "(" ? "LPAREN" : "RPAREN" });
+      } else if (match[4] !== undefined) {
+        const val = match[4];
+        const upper = val.toUpperCase();
+        if (upper === "AND" || upper === "&&") {
+          rawTokens.push({ type: "AND" });
+        } else if (upper === "OR" || upper === "||") {
+          rawTokens.push({ type: "OR" });
+        } else if (upper === "NOT" || upper === "!") {
+          rawTokens.push({ type: "NOT" });
+        } else {
+          rawTokens.push({ type: "TERM", value: val.toLowerCase() });
+        }
       }
-      renderUserTable();
+    }
+
+    if (rawTokens.length === 0) return true;
+
+    // Inserir operador AND implícito entre termos/parênteses consecutivos
+    const tokens = [];
+    for (let i = 0; i < rawTokens.length; i++) {
+      const cur = rawTokens[i];
+      const prev = tokens[tokens.length - 1];
+      if (prev) {
+        const prevCanEndExpr = prev.type === "TERM" || prev.type === "RPAREN";
+        const curCanStartExpr = cur.type === "TERM" || cur.type === "LPAREN" || cur.type === "NOT";
+        if (prevCanEndExpr && curCanStartExpr) {
+          tokens.push({ type: "AND" });
+        }
+      }
+      tokens.push(cur);
+    }
+
+    let pos = 0;
+    function peek() {
+      return tokens[pos];
+    }
+    function consume() {
+      return tokens[pos++];
+    }
+
+    function parseExpression() {
+      let left = parseAnd();
+      while (peek() && peek().type === "OR") {
+        consume();
+        const right = parseAnd();
+        left = left || right;
+      }
+      return left;
+    }
+
+    function parseAnd() {
+      let left = parseNot();
+      while (peek() && peek().type === "AND") {
+        consume();
+        const right = parseNot();
+        left = left && right;
+      }
+      return left;
+    }
+
+    function parseNot() {
+      if (peek() && peek().type === "NOT") {
+        consume();
+        const operand = parseNot();
+        return !operand;
+      }
+      return parsePrimary();
+    }
+
+    function parsePrimary() {
+      const token = peek();
+      if (!token) return true;
+
+      if (token.type === "LPAREN") {
+        consume();
+        const result = parseExpression();
+        if (peek() && peek().type === "RPAREN") {
+          consume();
+        }
+        return result;
+      }
+
+      if (token.type === "TERM") {
+        consume();
+        const term = token.value;
+        return normalizedLabels.some((l) => l === term || l.includes(term));
+      }
+
+      consume();
+      return true;
+    }
+
+    try {
+      return Boolean(parseExpression());
+    } catch (err) {
+      return normalizedLabels.some((l) => l.includes(query.toLowerCase()));
+    }
+  }
+
+  function populateFilterDropdowns() {
+    const categories = new Set();
+    const labels = new Set();
+    const roles = new Set();
+
+    state.users.forEach((u) => {
+      if (u.teamCategory) categories.add(u.teamCategory);
+      (u.teamLabels || []).forEach((l) => labels.add(l));
+      (u.roles || []).forEach((r) => roles.add(r));
     });
-  });
 
-  els.tableBody.querySelectorAll(".edit-user-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const id = String(btn.dataset.id);
-      openEditModal(id);
+    if (els.filterCategory) {
+      const cur = els.filterCategory.value;
+      els.filterCategory.innerHTML = '<option value="all">Todas as categorias</option>';
+      Array.from(categories).sort().forEach((cat) => {
+        els.filterCategory.innerHTML += `<option value="${sanitize(cat)}">${sanitize(cat)}</option>`;
+      });
+      els.filterCategory.value = cur;
+    }
+
+    if (els.labelsFilterDataList) {
+      els.labelsFilterDataList.innerHTML = "";
+      Array.from(labels).sort().forEach((lbl) => {
+        els.labelsFilterDataList.innerHTML += `<option value="${sanitize(lbl)}"></option>`;
+      });
+    }
+
+    if (els.categoryDataList) {
+      els.categoryDataList.innerHTML = "";
+      Array.from(categories).sort().forEach((cat) => {
+        els.categoryDataList.innerHTML += `<option value="${sanitize(cat)}"></option>`;
+      });
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // FILTRAGEM & TABELA
+  // --------------------------------------------------------------------------
+  function getFilteredUsers() {
+    const q = state.filterText.toLowerCase().trim();
+
+    return state.users.filter((user) => {
+      if (q) {
+        const uMatch = user.username.toLowerCase().includes(q);
+        const nMatch = user.name.toLowerCase().includes(q);
+        const eMatch = user.email.toLowerCase().includes(q);
+        if (!uMatch && !nMatch && !eMatch) return false;
+      }
+
+      if (state.filterCategory !== "all" && user.teamCategory !== state.filterCategory) {
+        return false;
+      }
+
+      if (state.filterLabel && state.filterLabel.trim() !== "" && state.filterLabel !== "all") {
+        if (!matchLabelsExpression(user.teamLabels, state.filterLabel)) {
+          return false;
+        }
+      }
+
+      if (state.filterRole !== "all" && !(user.roles || []).includes(state.filterRole)) {
+        return false;
+      }
+
+      if (state.filterEnabled === "enabled" && !user.enabled) return false;
+      if (state.filterEnabled === "disabled" && user.enabled) return false;
+
+      return true;
     });
-  });
-}
+  }
 
-function applyBulkEdits() {
-  const scope = els.bulkScope?.value || "selected";
-  let targetUsers = [];
+  function getSortedUsers(items) {
+    return items.slice().sort((a, b) => {
+      let valA, valB;
+      switch (state.sortKey) {
+        case "name":
+          valA = a.name.toLowerCase();
+          valB = b.name.toLowerCase();
+          break;
+        case "category":
+          valA = (a.teamCategory || "").toLowerCase();
+          valB = (b.teamCategory || "").toLowerCase();
+          break;
+        case "enabled":
+          valA = a.enabled ? 1 : 0;
+          valB = b.enabled ? 1 : 0;
+          break;
+        default:
+          valA = a.username.toLowerCase();
+          valB = b.username.toLowerCase();
+          break;
+      }
 
-  const filtered = getFilteredUsers();
-  const sorted = getSortedUsers(filtered);
-  const { items } = paginateUsers(sorted);
+      if (valA < valB) return state.sortDir === "asc" ? -1 : 1;
+      if (valA > valB) return state.sortDir === "asc" ? 1 : -1;
+      return 0;
+    });
+  }
 
-  if (scope === "selected") {
-    if (state.selectedUserIds.size === 0) {
-      setStatus("Nenhum usuario selecionado. Marque as caixas na tabela ou mude o escopo.", true);
+  function renderTable() {
+    if (!els.tableBody) return;
+
+    const filtered = getFilteredUsers();
+    const sorted = getSortedUsers(filtered);
+
+    const total = sorted.length;
+    const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
+    if (state.page > totalPages) state.page = totalPages;
+
+    const startIdx = (state.page - 1) * state.pageSize;
+    const pageItems = sorted.slice(startIdx, startIdx + state.pageSize);
+
+    if (els.pageLabel) els.pageLabel.textContent = `Página ${state.page} de ${totalPages}`;
+    if (els.pageStats) {
+      els.pageStats.textContent = total > 0
+        ? `Mostrando ${startIdx + 1} a ${Math.min(startIdx + state.pageSize, total)} de ${total}`
+        : "Nenhum usuário encontrado";
+    }
+
+    if (els.prevPageBtn) els.prevPageBtn.disabled = state.page <= 1;
+    if (els.nextPageBtn) els.nextPageBtn.disabled = state.page >= totalPages;
+
+    if (pageItems.length === 0) {
+      els.tableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--ink-muted); padding: 24px;">Nenhum usuário corresponde aos filtros.</td></tr>`;
+      if (els.selectAllCheckbox) {
+        els.selectAllCheckbox.checked = false;
+        els.selectAllCheckbox.indeterminate = false;
+      }
       return;
     }
-    targetUsers = state.users.filter((u) => state.selectedUserIds.has(String(u.id)));
-  } else if (scope === "page") {
-    targetUsers = items;
-  } else if (scope === "filtered") {
-    targetUsers = filtered;
-  }
 
-  if (targetUsers.length === 0) {
-    setStatus("Nenhum usuario afetado pelas alteraçoes em lote.", true);
-    return;
-  }
+    if (els.selectAllCheckbox) {
+      const pageIds = pageItems.map((u) => String(u.id));
+      const selectedCountOnPage = pageIds.filter((id) => state.selectedUserIds.has(id)).length;
+      els.selectAllCheckbox.checked = pageItems.length > 0 && selectedCountOnPage === pageItems.length;
+      els.selectAllCheckbox.indeterminate = selectedCountOnPage > 0 && selectedCountOnPage < pageItems.length;
+    }
 
-  const newCat = (els.bulkCategory?.value || "").trim();
-  const rawLabels = els.bulkLabels?.value || "";
-  const parsedLabels = parseLabelsInput(rawLabels);
-  const labelsMode = els.bulkLabelsMode?.value || "add";
-  const newEnabled = els.bulkEnabled?.value || "keep";
+    els.tableBody.innerHTML = "";
 
-  let modifiedCount = 0;
+    pageItems.forEach((user) => {
+      const tr = document.createElement("tr");
+      const changed = isUserChanged(user);
+      if (changed) tr.classList.add("row-changed");
 
-  targetUsers.forEach((user) => {
-    let changed = false;
+      const uId = String(user.id);
+      const isSelected = state.selectedUserIds.has(uId);
 
-    // Apply category & labels updates ONLY to users that have a Team
-    if (user.hasTeam) {
-      if (newCat) {
-        user.category = newCat;
-        changed = true;
-      }
+      const labelsHtml = (user.teamLabels && user.teamLabels.length > 0)
+        ? user.teamLabels.map((l) => `<span class="pill">${sanitize(l)}</span>`).join("")
+        : '<span style="color: var(--ink-muted); font-size: 0.78rem;">-</span>';
 
-      if (parsedLabels.length > 0 || labelsMode === "replace") {
-        let currentLabels = Array.isArray(user.labels) ? [...user.labels] : [];
-        if (labelsMode === "add") {
-          parsedLabels.forEach((l) => {
-            if (!currentLabels.includes(l)) currentLabels.push(l);
-          });
-        } else if (labelsMode === "replace") {
-          currentLabels = [...parsedLabels];
-        } else if (labelsMode === "remove") {
-          currentLabels = currentLabels.filter((l) => !parsedLabels.includes(l));
+      const rolesHtml = (user.roles && user.roles.length > 0)
+        ? user.roles.map((r) => `<span class="pill pill-role">${sanitize(r)}</span>`).join("")
+        : '<span class="pill pill-role">team</span>';
+
+      const categoryHtml = user.teamCategory
+        ? `<span class="pill pill-category">${sanitize(user.teamCategory)}</span>`
+        : '<span style="color: var(--ink-muted); font-size: 0.78rem;">-</span>';
+
+      const statusBadge = user.enabled
+        ? '<span class="badge badge-ac">Ativo</span>'
+        : '<span class="badge badge-dim">Inativo</span>';
+
+      tr.innerHTML = `
+        <td style="text-align: center;">
+          <input type="checkbox" class="user-row-checkbox" data-id="${sanitize(uId)}" ${isSelected ? "checked" : ""} />
+        </td>
+        <td style="font-family: var(--font-mono); font-weight: 700; color: var(--ink);">${sanitize(user.username)}</td>
+        <td>
+          <div style="font-weight: 600;">${sanitize(user.name)}</div>
+          ${changed ? '<span class="pill pill-role" style="font-size: 0.65rem;">Modificado</span>' : ""}
+        </td>
+        <td style="font-size: 0.82rem; color: var(--ink-secondary); font-family: var(--font-mono);">${sanitize(user.email || "-")}</td>
+        <td>${categoryHtml}</td>
+        <td><div class="pill-list">${labelsHtml}</div></td>
+        <td><div class="pill-list">${rolesHtml}</div></td>
+        <td style="text-align: center;">${statusBadge}</td>
+        <td style="text-align: right;">
+          <button type="button" class="btn-sm dim edit-user-btn" data-id="${sanitize(uId)}">✏️ Editar</button>
+        </td>
+      `;
+
+      // Checkbox da linha
+      const rowCheckbox = tr.querySelector(".user-row-checkbox");
+      rowCheckbox.addEventListener("change", (e) => {
+        if (e.target.checked) {
+          state.selectedUserIds.add(uId);
+        } else {
+          state.selectedUserIds.delete(uId);
         }
-        user.labels = currentLabels;
-        changed = true;
-      }
-    }
-
-    // Enabled update applies to all selected users
-    if (newEnabled === "enable" && !user.enabled) {
-      user.enabled = true;
-      changed = true;
-    } else if (newEnabled === "disable" && user.enabled) {
-      user.enabled = false;
-      changed = true;
-    }
-
-    if (changed) modifiedCount++;
-  });
-
-  populateFilterDropdowns();
-  renderUserTable();
-  setStatus(`Alteraçoes em lote aplicadas com sucesso em ${modifiedCount} usuario(s). (Usuarios sem Team nao tiveram categoria/labels alteradas)`);
-}
-
-async function ensureCategoryId(categoryName) {
-  if (!categoryName || !categoryName.trim()) return null;
-  const nameTrim = categoryName.trim();
-  const lower = nameTrim.toLowerCase();
-
-  if (state.categoriesMap && state.categoriesMap.has(lower)) {
-    return state.categoriesMap.get(lower);
-  }
-
-  return nameTrim;
-}
-
-function didUserFieldsChange(user) {
-  if (user.isNew) return true;
-  const original = state.originalUsersMap.get(String(user.id));
-  if (!original) return false;
-
-  if (user.username !== original.username) return true;
-  if (user.name !== original.name) return true;
-  if ((user.email || "") !== (original.email || "")) return true;
-  if (Boolean(user.enabled) !== Boolean(original.enabled)) return true;
-  if (Boolean(user.hasTeam) !== Boolean(original.hasTeam)) return true;
-  if (user.password) return true;
-
-  const currentRoles = [...(user.roles || [])].sort().join(",");
-  const origRoles = [...(original.roles || [])].sort().join(",");
-  if (currentRoles !== origRoles) return true;
-
-  return false;
-}
-
-async function saveUserToApi(user) {
-  const isNew = Boolean(user.isNew);
-
-  // If user is set to have a Team, ensure Team is saved / created via POST /teams
-  if (user.hasTeam) {
-    const categoryId = await ensureCategoryId(user.category);
-    const teamFormData = new FormData();
-    if (user.team_id) {
-      teamFormData.append("id", String(user.team_id));
-    }
-    const teamName = String(user.name || user.username).trim();
-    teamFormData.append("name", teamName);
-    teamFormData.append("display_name", teamName);
-
-    if (user.labels && user.labels.length > 0) {
-      teamFormData.append("label", user.labels.join(", "));
-    }
-    if (categoryId) {
-      teamFormData.append("group_ids[]", String(categoryId));
-    }
-
-    try {
-      const teamRes = await apiFetch("teams", {
-        method: "POST",
-        body: teamFormData,
+        updateKpis();
+        if (els.selectAllCheckbox) {
+          const pageIds = pageItems.map((p) => String(p.id));
+          const selectedCountOnPage = pageIds.filter((id) => state.selectedUserIds.has(id)).length;
+          els.selectAllCheckbox.checked = pageItems.length > 0 && selectedCountOnPage === pageItems.length;
+          els.selectAllCheckbox.indeterminate = selectedCountOnPage > 0 && selectedCountOnPage < pageItems.length;
+        }
       });
-      if (teamRes && teamRes.id) {
-        user.team_id = String(teamRes.id);
-      }
-    } catch (teamErr) {
-      console.warn("Aviso ao salvar Team na API via FormData, tentando JSON...", teamErr);
-      try {
-        const teamPayload = {
-          name: teamName,
-          display_name: teamName,
-        };
-        if (user.team_id) teamPayload.id = String(user.team_id);
-        if (user.labels && user.labels.length > 0) teamPayload.label = user.labels.join(", ");
-        if (categoryId) teamPayload.group_ids = [String(categoryId)];
 
-        const teamResJson = await apiFetch("teams", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(teamPayload),
-        });
-        if (teamResJson && teamResJson.id) {
-          user.team_id = String(teamResJson.id);
-        }
-      } catch (e2) {
-        console.warn("Nao foi possivel salvar Team na API:", e2);
-      }
-    }
-  }
+      // Botão editar
+      tr.querySelector(".edit-user-btn").addEventListener("click", () => {
+        openEditModal(user);
+      });
 
-  // If user is not new AND user fields (username, name, email, roles, etc) didn't change,
-  // we only needed to update the Team (which was done above). Skip updating user account.
-  if (!isNew && !didUserFieldsChange(user)) {
-    return { id: user.id };
-  }
-
-  const path = isNew ? "users" : `users/${encodeURIComponent(user.id)}`;
-  const rolesArr = Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : ["team"];
-
-  // Prepare FormData according to DOMjudge AddUser / UpdateUser schema
-  const userFormData = new FormData();
-  if (!isNew) {
-    userFormData.append("id", String(user.id));
-  }
-  userFormData.append("username", String(user.username || "").trim());
-  userFormData.append("name", String(user.name || user.username).trim());
-  userFormData.append("enabled", user.enabled ? "1" : "0");
-
-  if (user.email && String(user.email).trim()) {
-    userFormData.append("email", String(user.email).trim());
-  }
-  if (user.password && String(user.password).trim()) {
-    userFormData.append("password", String(user.password).trim());
-  }
-  if (user.hasTeam && user.team_id) {
-    userFormData.append("team_id", String(user.team_id));
-  }
-  rolesArr.forEach((role) => {
-    userFormData.append("roles[]", role);
-  });
-
-  try {
-    const res = await apiFetch(path, {
-      method: isNew ? "POST" : "PUT",
-      body: userFormData,
+      els.tableBody.appendChild(tr);
     });
-    return res;
-  } catch (formErr) {
-    console.warn("Falha no envio do usuario com FormData, tentando com JSON...", formErr);
+  }
 
-    const baseFields = {
-      username: String(user.username || "").trim(),
-      name: String(user.name || user.username).trim(),
-      enabled: Boolean(user.enabled),
-      roles: rolesArr,
-    };
-    if (!isNew) baseFields.id = String(user.id);
-    if (user.email && String(user.email).trim()) baseFields.email = String(user.email).trim();
-    if (user.password && String(user.password).trim()) baseFields.password = String(user.password).trim();
-    if (user.hasTeam && user.team_id) baseFields.team_id = String(user.team_id);
+  // --------------------------------------------------------------------------
+  // MODAL DE EDIÇÃO INDIVIDUAL
+  // --------------------------------------------------------------------------
+  function openEditModal(user) {
+    if (!els.editModal) return;
+    els.editUserId.value = user.id;
+    els.editUserTitle.textContent = `${user.username} (${user.name})`;
+    els.editUsername.value = user.username;
+    els.editName.value = user.name;
+    els.editEmail.value = user.email || "";
+    els.editPassword.value = "";
+    els.editHasTeam.checked = Boolean(user.hasTeam);
+    els.editCategory.value = user.teamCategory || "";
+    els.editLabels.value = (user.teamLabels || []).join(", ");
+    els.editEnabled.checked = Boolean(user.enabled);
 
-    try {
-      return await apiFetch(path, {
-        method: isNew ? "POST" : "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(baseFields),
-      });
-    } catch (jsonErr) {
-      // If updating an existing user and API returns "already exists" or 400,
-      // treat as non-fatal warning since user account already exists in DOMjudge.
-      if (!isNew && jsonErr.message && (jsonErr.message.includes("already exists") || jsonErr.message.includes("400"))) {
-        console.warn(`Aviso de atualizaçao de usuario ${user.username}:`, jsonErr.message);
-        return { id: user.id };
-      }
-      throw jsonErr;
+    document.querySelectorAll('input[name="editRoles"]').forEach((cb) => {
+      cb.checked = (user.roles || []).includes(cb.value);
+    });
+
+    els.editCategoryField.style.display = user.hasTeam ? "flex" : "none";
+    els.editLabelsField.style.display = user.hasTeam ? "flex" : "none";
+
+    els.editModal.hidden = false;
+  }
+
+  function saveEditModal(e) {
+    e.preventDefault();
+    const id = els.editUserId.value;
+    const user = state.users.find((u) => u.id === id);
+    if (!user) return;
+
+    user.username = els.editUsername.value.trim();
+    user.name = els.editName.value.trim();
+    user.email = els.editEmail.value.trim();
+    if (els.editPassword.value.trim()) {
+      user.password = els.editPassword.value.trim();
     }
+    user.hasTeam = els.editHasTeam.checked;
+    user.teamCategory = user.hasTeam ? els.editCategory.value.trim() : "";
+    user.teamLabels = user.hasTeam
+      ? els.editLabels.value.split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+    user.enabled = els.editEnabled.checked;
+
+    user.roles = Array.from(
+      document.querySelectorAll('input[name="editRoles"]:checked')
+    ).map((cb) => cb.value);
+
+    els.editModal.hidden = true;
+    renderTable();
+    updateKpis();
+    showToast(`Usuário ${user.username} atualizado localmente.`, "success");
   }
-}
 
-async function savePendingChanges() {
-  const changedUsers = state.users.filter(isUserChanged);
-  if (changedUsers.length === 0) {
-    setStatus("Nenhuma alteraçao pendente para salvar.");
-    return;
-  }
+  // --------------------------------------------------------------------------
+  // MODAL DE CRIAÇÃO (INDIVIDUAL & LOTE CSV COM PREVIEW)
+  // --------------------------------------------------------------------------
+  function downloadBatchTemplate(format = "csv") {
+    let content = "";
+    let filename = "";
+    let mime = "";
 
-  setStatus(`Salvando ${changedUsers.length} usuario(s) na API...`);
-
-  let successCount = 0;
-  let errorMessages = [];
-
-  for (const user of changedUsers) {
-    try {
-      const res = await saveUserToApi(user);
-      if (user.isNew && res && res.id) {
-        user.id = String(res.id);
-      }
-      user.isNew = false;
-      delete user.password;
-      state.originalUsersMap.set(String(user.id), copyUserObject(user));
-      successCount++;
-    } catch (err) {
-      console.warn(`Erro ao salvar usuario ${user.username}:`, err);
-      errorMessages.push(`${user.username}: ${err.message}`);
-      state.originalUsersMap.set(String(user.id), copyUserObject(user));
-      user.isNew = false;
+    if (format === "tsv") {
+      content = "username\tnome\temail\tsenha\tcategoria\tlabels\n" +
+        "aluno01\tAna Souza\tana.souza@email.com\tsenha123\tEstudantes\t2026-1;turma-a\n" +
+        "aluno02\tBruno Lima\tbruno.lima@email.com\tsenha123\tEstudantes\t2026-1;turma-b\n" +
+        "aluno03\tCarla Mendes\tcarla.mendes@email.com\tsenha123\tEstudantes\t2026-1;monitor\n";
+      filename = "modelo_usuarios_domjudge.tsv";
+      mime = "text/tab-separated-values;charset=utf-8;";
+    } else {
+      content = "username,nome,email,senha,categoria,labels\n" +
+        "aluno01,Ana Souza,ana.souza@email.com,senha123,Estudantes,2026-1;turma-a\n" +
+        "aluno02,Bruno Lima,bruno.lima@email.com,senha123,Estudantes,2026-1;turma-b\n" +
+        "aluno03,Carla Mendes,carla.mendes@email.com,senha123,Estudantes,2026-1;monitor\n";
+      filename = "modelo_usuarios_domjudge.csv";
+      mime = "text/csv;charset=utf-8;";
     }
+
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Modelo ${format.toUpperCase()} baixado com sucesso!`, "success");
   }
 
-  populateFilterDropdowns();
-  renderUserTable();
+  function parseBatchText(text) {
+    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    const defaultCat = els.batchDefaultCategory?.value?.trim() || "";
+    const defaultLbls = (els.batchDefaultLabels?.value || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-  if (errorMessages.length === 0) {
-    setStatus(`Sucesso! ${successCount} usuario(s) salvos na API.`);
-  } else {
-    setStatus(`Processado: ${successCount} salvos na API. Ocorreram erros: ${errorMessages.join("; ")}`, true);
-  }
-}
+    const parsed = [];
 
-function openCreateModal() {
-  if (els.createModal) els.createModal.hidden = false;
-  switchCreateTab("single");
-}
+    lines.forEach((line) => {
+      const parts = line.split(/[,\t]+/).map((p) => p.trim());
+      if (parts.length < 2) return;
 
-function closeCreateModal() {
-  if (els.createModal) els.createModal.hidden = true;
-}
+      const username = parts[0];
+      // Pular linha de cabeçalho se o usuário colou o template completo
+      if (
+        username.toLowerCase() === "username" ||
+        username.toLowerCase() === "usuario" ||
+        username.toLowerCase() === "user"
+      ) {
+        return;
+      }
 
-function switchCreateTab(tab) {
-  if (tab === "single") {
-    if (els.tabSingleBtn) els.tabSingleBtn.classList.add("active");
-    if (els.tabBatchBtn) els.tabBatchBtn.classList.remove("active");
-    if (els.createSingleForm) els.createSingleForm.hidden = false;
-    if (els.createBatchContainer) els.createBatchContainer.hidden = true;
-  } else {
-    if (els.tabBatchBtn) els.tabBatchBtn.classList.add("active");
-    if (els.tabSingleBtn) els.tabSingleBtn.classList.remove("active");
-    if (els.createSingleForm) els.createSingleForm.hidden = true;
-    if (els.createBatchContainer) els.createBatchContainer.hidden = false;
-  }
-}
+      const name = parts[1];
+      const email = parts[2] || "";
+      const password = parts[3] || "123456";
+      const category = parts[4] || defaultCat;
+      const labels = parts[5]
+        ? parts[5].split(";").map((s) => s.trim()).filter(Boolean)
+        : defaultLbls;
 
-function handleCreateSingleSubmit(e) {
-  e.preventDefault();
+      parsed.push({ username, name, email, password, category, labels });
+    });
 
-  const username = (document.getElementById("createUsername")?.value || "").trim();
-  const name = (document.getElementById("createName")?.value || "").trim();
-  const email = (document.getElementById("createEmail")?.value || "").trim();
-  const password = document.getElementById("createPassword")?.value || "";
-  const hasTeam = document.getElementById("createHasTeam")?.checked ?? true;
-  const category = (document.getElementById("createCategory")?.value || "").trim();
-  const rawLabels = document.getElementById("createLabels")?.value || "";
-  const enabled = document.getElementById("createEnabled")?.checked ?? true;
-
-  const roleCbs = Array.from(document.querySelectorAll('input[name="createRoles"]:checked'));
-  const roles = roleCbs.map((cb) => cb.value);
-
-  if (!username || !name || !password) {
-    alert("Preencha Username, Nome e Senha.");
-    return;
+    return parsed;
   }
 
-  const newId = `new_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-  const newUser = {
-    id: newId,
-    username,
-    name,
-    email,
-    password,
-    hasTeam,
-    team_id: null,
-    category: hasTeam ? category : "",
-    labels: hasTeam ? parseLabelsInput(rawLabels) : [],
-    roles: roles.length ? roles : ["team"],
-    enabled,
-    isNew: true,
-  };
+  function updateBatchPreview() {
+    if (!els.batchPreviewBody || !els.batchInputText) return;
+    const parsed = parseBatchText(els.batchInputText.value);
 
-  state.users.unshift(newUser);
-  populateFilterDropdowns();
-  renderUserTable();
-  closeCreateModal();
-  setStatus(`Usuario "${username}" criado com sucesso! Lembre de salvar alteraçoes.`);
+    if (els.batchCountBadge) els.batchCountBadge.textContent = parsed.length;
 
-  // Reset form
-  els.createSingleForm?.reset();
-}
+    if (parsed.length === 0) {
+      els.batchPreviewBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--ink-muted); padding: 12px;">Cole dados acima para ver o preview.</td></tr>`;
+      return;
+    }
 
-function handleProcessBatch() {
-  const text = els.batchInputText?.value || "";
-  if (!text.trim()) {
-    if (els.batchFeedback) els.batchFeedback.textContent = "Digite ou cole a lista de usuarios.";
-    return;
+    els.batchPreviewBody.innerHTML = parsed.map((p) => `
+      <tr>
+        <td style="font-family: var(--font-mono); font-weight: 700;">${sanitize(p.username)}</td>
+        <td>${sanitize(p.name)}</td>
+        <td>${sanitize(p.email || "-")}</td>
+        <td>${sanitize(p.category || "-")}</td>
+        <td>${sanitize(p.labels.join(", ") || "-")}</td>
+      </tr>
+    `).join("");
   }
 
-  const hasTeam = document.getElementById("batchHasTeam")?.checked ?? true;
-  const defaultCat = (els.batchDefaultCategory?.value || "").trim();
-  const defaultLabels = parseLabelsInput(els.batchDefaultLabels?.value || "");
+  function saveCreateSingle(e) {
+    e.preventDefault();
+    const username = document.getElementById("createUsername").value.trim();
+    const name = document.getElementById("createName").value.trim();
+    const email = document.getElementById("createEmail").value.trim();
+    const password = document.getElementById("createPassword").value.trim();
+    const hasTeam = els.createHasTeam.checked;
+    const teamCategory = hasTeam ? els.createCategory.value.trim() : "";
+    const teamLabels = hasTeam
+      ? els.createLabels.value.split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+    const enabled = document.getElementById("createEnabled").checked;
+    const roles = Array.from(
+      document.querySelectorAll('input[name="createRoles"]:checked')
+    ).map((cb) => cb.value);
 
-  const lines = text.split("\n");
-  let createdCount = 0;
-
-  lines.forEach((line) => {
-    const cleaned = line.trim();
-    if (!cleaned || cleaned.startsWith("#")) return;
-
-    const parts = cleaned.split(/,|\t/).map((p) => p.trim());
-    if (parts.length < 2) return;
-
-    const username = parts[0];
-    const name = parts[1] || username;
-    const email = parts[2] || "";
-    const password = parts[3] || "123456";
-    const category = parts[4] || defaultCat;
-    
-    let labels = parts[5] ? parseLabelsInput(parts[5]) : defaultLabels;
-
-    const newId = `new_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-    state.users.unshift({
-      id: newId,
+    const newUser = {
+      id: `new_${Date.now()}`,
       username,
       name,
       email,
       password,
       hasTeam,
-      team_id: null,
-      category: hasTeam ? category : "",
-      labels: hasTeam ? labels : [],
-      roles: ["team"],
-      enabled: true,
-      isNew: true,
-    });
+      teamCategory,
+      teamLabels,
+      enabled,
+      roles,
+    };
 
-    createdCount++;
-  });
-
-  if (createdCount > 0) {
+    state.users.unshift(newUser);
+    els.createModal.hidden = true;
+    els.createSingleForm.reset();
     populateFilterDropdowns();
-    renderUserTable();
-    closeCreateModal();
-    if (els.batchInputText) els.batchInputText.value = "";
-    setStatus(`${createdCount} usuario(s) criados em lote com sucesso!`);
-  } else {
-    if (els.batchFeedback) els.batchFeedback.textContent = "Nenhuma linha valida identificada. Verifique o formato.";
-  }
-}
-
-function openEditModal(userId) {
-  const user = state.users.find((u) => String(u.id) === String(userId));
-  if (!user) return;
-
-  if (els.editUserTitle) els.editUserTitle.textContent = user.username;
-  document.getElementById("editUserId").value = user.id;
-  document.getElementById("editUsername").value = user.username;
-  document.getElementById("editName").value = user.name;
-  document.getElementById("editEmail").value = user.email || "";
-  document.getElementById("editPassword").value = "";
-  
-  const editHasTeamCb = document.getElementById("editHasTeam");
-  if (editHasTeamCb) editHasTeamCb.checked = Boolean(user.hasTeam);
-
-  const editCatInput = document.getElementById("editCategory");
-  const editLblInput = document.getElementById("editLabels");
-
-  if (editCatInput) {
-    editCatInput.value = user.category || "";
-    editCatInput.disabled = !user.hasTeam;
-  }
-  if (editLblInput) {
-    editLblInput.value = formatLabelsString(user.labels);
-    editLblInput.disabled = !user.hasTeam;
+    renderTable();
+    updateKpis();
+    showToast(`Usuário ${username} adicionado à lista para salvar!`, "success");
   }
 
-  document.getElementById("editEnabled").checked = user.enabled;
+  function processBatchUsers() {
+    const parsed = parseBatchText(els.batchInputText.value);
+    if (parsed.length === 0) {
+      showToast("Nenhum usuário válido encontrado no texto colado.", "warning");
+      return;
+    }
 
-  const roleCbs = document.querySelectorAll('input[name="editRoles"]');
-  roleCbs.forEach((cb) => {
-    cb.checked = Array.isArray(user.roles) && user.roles.includes(cb.value);
-  });
+    const hasTeam = els.batchHasTeam.checked;
 
-  if (els.editModal) els.editModal.hidden = false;
-}
-
-function closeEditModal() {
-  if (els.editModal) els.editModal.hidden = true;
-}
-
-function handleEditSingleSubmit(e) {
-  e.preventDefault();
-
-  const id = document.getElementById("editUserId")?.value;
-  const user = state.users.find((u) => String(u.id) === String(id));
-  if (!user) return;
-
-  user.username = (document.getElementById("editUsername")?.value || "").trim();
-  user.name = (document.getElementById("editName")?.value || "").trim();
-  user.email = (document.getElementById("editEmail")?.value || "").trim();
-  
-  const pass = document.getElementById("editPassword")?.value || "";
-  if (pass) user.password = pass;
-
-  const hasTeam = document.getElementById("editHasTeam")?.checked ?? true;
-  user.hasTeam = hasTeam;
-
-  if (hasTeam) {
-    user.category = (document.getElementById("editCategory")?.value || "").trim();
-    user.labels = parseLabelsInput(document.getElementById("editLabels")?.value || "");
-  } else {
-    user.category = "";
-    user.labels = [];
-  }
-
-  user.enabled = document.getElementById("editEnabled")?.checked ?? true;
-
-  const roleCbs = Array.from(document.querySelectorAll('input[name="editRoles"]:checked'));
-  user.roles = roleCbs.map((cb) => cb.value);
-
-  populateFilterDropdowns();
-  renderUserTable();
-  closeEditModal();
-  setStatus(`Usuario "${user.username}" atualizado!`);
-}
-
-function exportUsersCsv() {
-  const filtered = getFilteredUsers();
-  if (filtered.length === 0) {
-    setStatus("Nenhum usuario para exportar.", true);
-    return;
-  }
-
-  const header = ["ID", "Username", "Name", "Email", "HasTeam", "Category", "Labels", "Roles", "Enabled"];
-  const rows = filtered.map((u) => [
-    `"${String(u.id).replace(/"/g, '""')}"`,
-    `"${String(u.username).replace(/"/g, '""')}"`,
-    `"${String(u.name).replace(/"/g, '""')}"`,
-    `"${String(u.email || "").replace(/"/g, '""')}"`,
-    u.hasTeam ? "true" : "false",
-    `"${String(u.category || "").replace(/"/g, '""')}"`,
-    `"${formatLabelsString(u.labels).replace(/"/g, '""')}"`,
-    `"${(u.roles || []).join(", ").replace(/"/g, '""')}"`,
-    u.enabled ? "true" : "false",
-  ]);
-
-  const csvContent = [header.join(","), ...rows.map((r) => r.join(","))].join("\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "usuarios_domjudge.csv";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-
-  setStatus(`Exportados ${filtered.length} usuarios para CSV.`);
-}
-
-// Event Listeners Initialization
-function initEventListeners() {
-  els.loadUsersBtn?.addEventListener("click", loadUsersFromApi);
-  els.loadDemoUsersBtn?.addEventListener("click", generateDemoUsers);
-
-  // Filter Listeners
-  els.filterText?.addEventListener("input", () => {
-    state.filterText = els.filterText.value;
-    state.page = 1;
-    renderUserTable();
-  });
-
-  els.filterCategory?.addEventListener("change", () => {
-    state.filterCategory = els.filterCategory.value;
-    state.page = 1;
-    renderUserTable();
-  });
-
-  els.filterLabel?.addEventListener("change", () => {
-    state.filterLabel = els.filterLabel.value;
-    state.page = 1;
-    renderUserTable();
-  });
-
-  els.filterRole?.addEventListener("change", () => {
-    state.filterRole = els.filterRole.value;
-    state.page = 1;
-    renderUserTable();
-  });
-
-  els.filterEnabled?.addEventListener("change", () => {
-    state.filterEnabled = els.filterEnabled.value;
-    state.page = 1;
-    renderUserTable();
-  });
-
-  // Checkbox field toggles for Team inputs
-  els.createHasTeam?.addEventListener("change", (e) => {
-    const checked = e.target.checked;
-    if (els.createCategory) els.createCategory.disabled = !checked;
-    if (els.createLabels) els.createLabels.disabled = !checked;
-  });
-
-  els.editHasTeam?.addEventListener("change", (e) => {
-    const checked = e.target.checked;
-    if (els.editCategory) els.editCategory.disabled = !checked;
-    if (els.editLabels) els.editLabels.disabled = !checked;
-  });
-
-  // Table Sort Header Listeners
-  document.querySelectorAll(".manager-sort").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const key = btn.dataset.sort;
-      if (state.sortKey === key) {
-        state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
-      } else {
-        state.sortKey = key;
-        state.sortDir = "asc";
-      }
-      renderUserTable();
+    parsed.forEach((p, idx) => {
+      state.users.unshift({
+        id: `batch_${Date.now()}_${idx}`,
+        username: p.username,
+        name: p.name,
+        email: p.email,
+        password: p.password,
+        hasTeam,
+        teamCategory: p.category,
+        teamLabels: p.labels,
+        enabled: true,
+        roles: ["team"],
+      });
     });
-  });
 
-  // Select All Checkbox
-  els.selectAllCheckbox?.addEventListener("change", (e) => {
-    const filtered = getFilteredUsers();
-    const sorted = getSortedUsers(filtered);
-    const { items } = paginateUsers(sorted);
+    els.createModal.hidden = true;
+    els.batchInputText.value = "";
+    populateFilterDropdowns();
+    renderTable();
+    updateKpis();
+    showToast(`${parsed.length} usuários adicionados com sucesso!`, "success");
+  }
 
-    if (e.target.checked) {
-      items.forEach((u) => state.selectedUserIds.add(String(u.id)));
+  // --------------------------------------------------------------------------
+  // AÇÕES EM LOTE (CATEGORIA, LABELS, STATUS)
+  // --------------------------------------------------------------------------
+  function applyBulkAction() {
+    const scope = els.bulkScope?.value || "selected";
+    let targets = [];
+
+    if (scope === "selected") {
+      targets = state.users.filter((u) => state.selectedUserIds.has(String(u.id)));
+      if (targets.length === 0) {
+        showToast("Nenhum usuário selecionado. Marque os checkboxes ou altere o Escopo para 'Página atual' ou 'Todos filtrados'.", "warning");
+        return;
+      }
+    } else if (scope === "page") {
+      const filtered = getFilteredUsers();
+      const sorted = getSortedUsers(filtered);
+      const startIdx = (state.page - 1) * state.pageSize;
+      targets = sorted.slice(startIdx, startIdx + state.pageSize);
     } else {
-      items.forEach((u) => state.selectedUserIds.delete(String(u.id)));
+      targets = getFilteredUsers();
     }
-    renderUserTable();
-  });
 
-  // Bulk Actions
-  els.applyBulkBtn?.addEventListener("click", applyBulkEdits);
-  els.saveChangesBtn?.addEventListener("click", savePendingChanges);
-  els.exportUsersCsvBtn?.addEventListener("click", exportUsersCsv);
-
-  // Pagination
-  els.pageSize?.addEventListener("change", () => {
-    state.pageSize = Number(els.pageSize.value) || 15;
-    state.page = 1;
-    renderUserTable();
-  });
-
-  els.prevPageBtn?.addEventListener("click", () => {
-    if (state.page > 1) {
-      state.page--;
-      renderUserTable();
+    if (targets.length === 0) {
+      showToast("Nenhum usuário no escopo selecionado para aplicar alterações.", "warning");
+      return;
     }
-  });
 
-  els.nextPageBtn?.addEventListener("click", () => {
-    state.page++;
-    renderUserTable();
-  });
+    const newCategory = els.bulkCategory?.value?.trim();
+    const newLabelsRaw = (els.bulkLabels?.value || "").trim();
+    const labelsMode = els.bulkLabelsMode?.value || "add";
+    const newEnabled = els.bulkEnabled?.value || "keep";
 
-  // Create Modal Events
-  els.openCreateModalBtn?.addEventListener("click", openCreateModal);
-  els.closeCreateModalBtn?.addEventListener("click", closeCreateModal);
-  els.cancelCreateSingleBtn?.addEventListener("click", closeCreateModal);
-  els.cancelCreateBatchBtn?.addEventListener("click", closeCreateModal);
+    const isReplacing = labelsMode === "replace";
+    const hasLabelsInput = newLabelsRaw.length > 0;
+    const inputLabels = hasLabelsInput
+      ? newLabelsRaw.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)
+      : [];
 
-  els.tabSingleBtn?.addEventListener("click", () => switchCreateTab("single"));
-  els.tabBatchBtn?.addEventListener("click", () => switchCreateTab("batch"));
+    targets.forEach((u) => {
+      if (newCategory) {
+        u.teamCategory = newCategory;
+        u.hasTeam = true;
+        if (!u.teamId) u.teamId = u.username;
+      }
 
-  els.createSingleForm?.addEventListener("submit", handleCreateSingleSubmit);
-  els.processBatchBtn?.addEventListener("click", handleProcessBatch);
+      if (hasLabelsInput || isReplacing) {
+        let nextLabels = [];
+        if (labelsMode === "add") {
+          const set = new Set(u.teamLabels || []);
+          inputLabels.forEach((l) => set.add(l));
+          nextLabels = Array.from(set);
+        } else if (labelsMode === "replace") {
+          nextLabels = [...inputLabels];
+        } else if (labelsMode === "remove") {
+          const set = new Set(u.teamLabels || []);
+          inputLabels.forEach((l) => set.delete(l));
+          nextLabels = Array.from(set);
+        }
+        u.teamLabels = nextLabels;
+        u.hasTeam = true;
+        if (!u.teamId) u.teamId = u.username;
+      }
 
-  // Edit Modal Events
-  els.closeEditModalBtn?.addEventListener("click", closeEditModal);
-  els.cancelEditModalBtn?.addEventListener("click", closeEditModal);
-  els.editSingleForm?.addEventListener("submit", handleEditSingleSubmit);
-}
+      if (newEnabled === "enable") u.enabled = true;
+      if (newEnabled === "disable") u.enabled = false;
+    });
 
-// Initial Kickoff
+    // Se havia filtro de labels que ocultaria os usuários atualizados, limpar o filtro
+    if (state.filterLabel) {
+      state.filterLabel = "";
+      if (els.filterLabel) els.filterLabel.value = "";
+    }
+
+    populateFilterDropdowns();
+    renderTable();
+    updateKpis();
+    showToast(`Alterações aplicadas a ${targets.length} usuário(s)! Clique em "Salvar no DOMjudge" para sincronizar.`, "success");
+  }
+
+  // --------------------------------------------------------------------------
+  // SALVAR ALTERAÇÕES NA API
+  // --------------------------------------------------------------------------
+  async function saveChanges() {
+    const creds = window.getApiCredentials ? window.getApiCredentials() : null;
+    if (!creds || !creds.apiBase) {
+      showToast("Sessão da API não disponível.", "error");
+      return;
+    }
+
+    const changedUsers = state.users.filter(isUserChanged);
+    if (changedUsers.length === 0) {
+      showToast("Não há alterações pendentes para salvar.", "info");
+      return;
+    }
+
+    try {
+      showToast(`Sincronizando ${changedUsers.length} usuário(s) no DOMjudge...`, "info");
+      els.saveChangesBtn.disabled = true;
+
+      const authHeaders = {};
+      if (creds.user && creds.password) {
+        authHeaders["Authorization"] = `Basic ${btoa(`${creds.user}:${creds.password}`)}`;
+      }
+
+      // 1. Criar times genuinamente novos (que ainda não existiam no DOMjudge)
+      const newTeamsToCreate = [];
+      changedUsers.forEach((u) => {
+        if (u.hasTeam || u.teamId || u.teamCategory || (u.teamLabels && u.teamLabels.length > 0)) {
+          const tId = u.teamId || u.username;
+          if (!state.teamsMap.has(String(tId))) {
+            let groupIds = [];
+            if (u.teamCategory) {
+              // Buscar ID da categoria/grupo pelo nome ou slug
+              let foundGid = null;
+              for (const [gid, gname] of state.categoriesMap.entries()) {
+                if (
+                  gname.toLowerCase() === u.teamCategory.toLowerCase() ||
+                  gid.toLowerCase() === u.teamCategory.toLowerCase()
+                ) {
+                  foundGid = gid;
+                  break;
+                }
+              }
+              groupIds = [foundGid || u.teamCategory.toLowerCase().replace(/[^a-z0-9_-]/g, "") || "participants"];
+            } else {
+              groupIds = ["participants"];
+            }
+
+            newTeamsToCreate.push({
+              id: tId,
+              name: u.name || u.username,
+              group_ids: groupIds,
+              label: Array.isArray(u.teamLabels) ? u.teamLabels.join(", ") : (u.teamLabels || ""),
+            });
+          }
+        }
+      });
+
+      if (newTeamsToCreate.length > 0) {
+        try {
+          const fdTeams = new FormData();
+          fdTeams.append(
+            "json",
+            new Blob([JSON.stringify(newTeamsToCreate)], { type: "application/json" }),
+            "teams.json"
+          );
+          const resTeams = await fetch(`${creds.apiBase}/users/teams`, {
+            method: "POST",
+            headers: authHeaders,
+            body: fdTeams,
+          });
+          if (!resTeams.ok) {
+            console.warn("Aviso ao criar novos times via API:", await resTeams.text().catch(() => ""));
+          }
+        } catch (e) {
+          console.warn("Erro ao enviar teams.json:", e);
+        }
+      }
+
+      // 2. Sincronizar Contas/Usuários via /users/accounts
+      const accountsToSync = changedUsers.map((u) => ({
+        type: (u.roles && u.roles.includes("admin"))
+          ? "admin"
+          : (u.roles && u.roles.includes("jury") ? "jury" : "team"),
+        name: u.name,
+        username: u.username,
+        email: u.email || null,
+        team_id: (u.hasTeam || u.teamCategory || (u.teamLabels && u.teamLabels.length > 0))
+          ? (u.teamId || u.username)
+          : null,
+        roles: u.roles && u.roles.length > 0 ? u.roles : ["team"],
+        password: u.password || undefined,
+      }));
+
+      const fdAccounts = new FormData();
+      fdAccounts.append(
+        "json",
+        new Blob([JSON.stringify(accountsToSync)], { type: "application/json" }),
+        "accounts.json"
+      );
+
+      const resAccounts = await fetch(`${creds.apiBase}/users/accounts`, {
+        method: "POST",
+        headers: authHeaders,
+        body: fdAccounts,
+      });
+
+      if (!resAccounts.ok) {
+        const errTxt = await resAccounts.text().catch(() => "");
+        throw new Error(`Erro na API (${resAccounts.status}): ${errTxt}`);
+      }
+
+      // Atualizar mapeamento original de usuários
+      changedUsers.forEach((user) => {
+        if ((user.hasTeam || user.teamCategory || (user.teamLabels && user.teamLabels.length > 0)) && !user.teamId) {
+          user.teamId = user.username;
+          user.hasTeam = true;
+        }
+        state.originalUsersMap.set(user.id, JSON.parse(JSON.stringify(user)));
+      });
+
+      renderTable();
+      updateKpis();
+      showToast(`${changedUsers.length} usuário(s) sincronizados com sucesso no DOMjudge!`, "success");
+    } catch (err) {
+      console.error("Erro ao salvar alterações de usuários:", err);
+      showToast(`Falha ao salvar: ${err.message}`, "error");
+    } finally {
+      els.saveChangesBtn.disabled = state.users.filter(isUserChanged).length === 0;
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // EXPORTAR CSV
+  // --------------------------------------------------------------------------
+  function exportCsv() {
+    if (state.users.length === 0) {
+      showToast("Nenhum usuário para exportar.", "warning");
+      return;
+    }
+
+    let csv = "id,username,name,email,category,labels,roles,enabled\n";
+    state.users.forEach((u) => {
+      const labelsStr = (u.teamLabels || []).join(";");
+      const rolesStr = (u.roles || []).join(";");
+      csv += `"${u.id}","${u.username}","${u.name}","${u.email || ""}","${u.teamCategory || ""}","${labelsStr}","${rolesStr}","${u.enabled ? 1 : 0}"\n`;
+    });
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `domjudge_users_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("CSV de usuários exportado com sucesso!", "success");
+  }
+
+  // --------------------------------------------------------------------------
+  // INICIALIZAÇÃO
+  // --------------------------------------------------------------------------
+  function init() {
+    if (els.loadUsersBtn) els.loadUsersBtn.addEventListener("click", loadUsers);
+    if (els.saveChangesBtn) els.saveChangesBtn.addEventListener("click", saveChanges);
+    if (els.exportUsersCsvBtn) els.exportUsersCsvBtn.addEventListener("click", exportCsv);
+    if (els.applyBulkBtn) els.applyBulkBtn.addEventListener("click", applyBulkAction);
+
+    // Filtros
+    if (els.filterText) {
+      els.filterText.addEventListener("input", (e) => {
+        state.filterText = e.target.value;
+        state.page = 1;
+        renderTable();
+      });
+    }
+    if (els.filterCategory) {
+      els.filterCategory.addEventListener("change", (e) => {
+        state.filterCategory = e.target.value;
+        state.page = 1;
+        renderTable();
+      });
+    }
+    if (els.filterLabel) {
+      const handleLabelFilter = (e) => {
+        state.filterLabel = e.target.value;
+        state.page = 1;
+        renderTable();
+      };
+      els.filterLabel.addEventListener("input", handleLabelFilter);
+      els.filterLabel.addEventListener("change", handleLabelFilter);
+    }
+    if (els.filterRole) {
+      els.filterRole.addEventListener("change", (e) => {
+        state.filterRole = e.target.value;
+        state.page = 1;
+        renderTable();
+      });
+    }
+    if (els.filterEnabled) {
+      els.filterEnabled.addEventListener("change", (e) => {
+        state.filterEnabled = e.target.value;
+        state.page = 1;
+        renderTable();
+      });
+    }
+
+    // Paginação
+    if (els.pageSize) {
+      els.pageSize.addEventListener("change", (e) => {
+        state.pageSize = parseInt(e.target.value, 10) || 100;
+        state.page = 1;
+        renderTable();
+      });
+    }
+    if (els.prevPageBtn) {
+      els.prevPageBtn.addEventListener("click", () => {
+        if (state.page > 1) {
+          state.page -= 1;
+          renderTable();
+        }
+      });
+    }
+    if (els.nextPageBtn) {
+      els.nextPageBtn.addEventListener("click", () => {
+        state.page += 1;
+        renderTable();
+      });
+    }
+
+    // Selecionar todos da página
+    if (els.selectAllCheckbox) {
+      els.selectAllCheckbox.addEventListener("change", (e) => {
+        const filtered = getFilteredUsers();
+        const sorted = getSortedUsers(filtered);
+        const startIdx = (state.page - 1) * state.pageSize;
+        const pageItems = sorted.slice(startIdx, startIdx + state.pageSize);
+
+        pageItems.forEach((u) => {
+          if (e.target.checked) state.selectedUserIds.add(u.id);
+          else state.selectedUserIds.delete(u.id);
+        });
+
+        renderTable();
+        updateKpis();
+      });
+    }
+
+    // Modais
+    if (els.openCreateModalBtn) {
+      els.openCreateModalBtn.addEventListener("click", () => {
+        if (els.tabSingleBtn) els.tabSingleBtn.classList.add("active");
+        if (els.tabBatchBtn) els.tabBatchBtn.classList.remove("active");
+        if (els.createSingleContainer) els.createSingleContainer.hidden = false;
+        if (els.createBatchContainer) els.createBatchContainer.hidden = true;
+        if (els.createModal) els.createModal.hidden = false;
+      });
+    }
+    if (els.closeCreateModalBtn) {
+      els.closeCreateModalBtn.addEventListener("click", () => {
+        if (els.createModal) els.createModal.hidden = true;
+      });
+    }
+    if (els.cancelCreateSingleBtn) {
+      els.cancelCreateSingleBtn.addEventListener("click", () => {
+        if (els.createModal) els.createModal.hidden = true;
+      });
+    }
+    if (els.cancelCreateBatchBtn) {
+      els.cancelCreateBatchBtn.addEventListener("click", () => {
+        if (els.createModal) els.createModal.hidden = true;
+      });
+    }
+
+    if (els.closeEditModalBtn) {
+      els.closeEditModalBtn.addEventListener("click", () => {
+        if (els.editModal) els.editModal.hidden = true;
+      });
+    }
+    if (els.cancelEditModalBtn) {
+      els.cancelEditModalBtn.addEventListener("click", () => {
+        if (els.editModal) els.editModal.hidden = true;
+      });
+    }
+
+    if (els.createSingleForm) els.createSingleForm.addEventListener("submit", saveCreateSingle);
+    if (els.editSingleForm) els.editSingleForm.addEventListener("submit", saveEditModal);
+    if (els.processBatchBtn) els.processBatchBtn.addEventListener("click", processBatchUsers);
+
+    // Abas do Modal Criar Usuários
+    if (els.tabSingleBtn && els.tabBatchBtn) {
+      els.tabSingleBtn.addEventListener("click", () => {
+        els.tabSingleBtn.classList.add("active");
+        els.tabBatchBtn.classList.remove("active");
+        if (els.createSingleContainer) els.createSingleContainer.hidden = false;
+        if (els.createBatchContainer) els.createBatchContainer.hidden = true;
+      });
+      els.tabBatchBtn.addEventListener("click", () => {
+        els.tabBatchBtn.classList.add("active");
+        els.tabSingleBtn.classList.remove("active");
+        if (els.createSingleContainer) els.createSingleContainer.hidden = true;
+        if (els.createBatchContainer) els.createBatchContainer.hidden = false;
+        updateBatchPreview();
+      });
+    }
+
+    if (els.createHasTeam) {
+      els.createHasTeam.addEventListener("change", (e) => {
+        els.createCategoryField.style.display = e.target.checked ? "flex" : "none";
+        els.createLabelsField.style.display = e.target.checked ? "flex" : "none";
+      });
+    }
+
+    if (els.editHasTeam) {
+      els.editHasTeam.addEventListener("change", (e) => {
+        els.editCategoryField.style.display = e.target.checked ? "flex" : "none";
+        els.editLabelsField.style.display = e.target.checked ? "flex" : "none";
+      });
+    }
+
+    if (els.batchInputText) {
+      els.batchInputText.addEventListener("input", updateBatchPreview);
+    }
+    if (els.batchDefaultCategory) {
+      els.batchDefaultCategory.addEventListener("input", updateBatchPreview);
+    }
+    if (els.batchDefaultLabels) {
+      els.batchDefaultLabels.addEventListener("input", updateBatchPreview);
+    }
+
+    if (els.downloadBatchTemplateCsvBtn) {
+      els.downloadBatchTemplateCsvBtn.addEventListener("click", () => downloadBatchTemplate("csv"));
+    }
+    if (els.downloadBatchTemplateTsvBtn) {
+      els.downloadBatchTemplateTsvBtn.addEventListener("click", () => downloadBatchTemplate("tsv"));
+    }
+
+    if (els.batchFileInput) {
+      els.batchFileInput.addEventListener("change", (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          if (els.batchInputText) {
+            els.batchInputText.value = ev.target.result;
+            updateBatchPreview();
+            showToast(`Arquivo "${file.name}" carregado com sucesso!`, "info");
+          }
+        };
+        reader.readAsText(file);
+        // Resetar o input para permitir selecionar o mesmo arquivo novamente
+        e.target.value = "";
+      });
+    }
+
+    // Ordenação
+    document.querySelectorAll('#view-users .th-sort-btn[data-sort]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sortKey = btn.getAttribute("data-sort");
+        if (state.sortKey === sortKey) {
+          state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+        } else {
+          state.sortKey = sortKey;
+          state.sortDir = "asc";
+        }
+        renderTable();
+      });
+    });
+  }
+
+  return { init, loadUsers, loadDemoUsers, renderTable };
+})();
+
 document.addEventListener("DOMContentLoaded", () => {
-  initEventListeners();
-  generateDemoUsers();
+  UsersModule.init();
 });

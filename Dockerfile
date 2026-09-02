@@ -3,8 +3,14 @@ FROM nginx:alpine
 ARG PORT=7070
 ENV PORT=${PORT}
 
+# Copiar arquivos da aplicação para o diretório raiz do Nginx
 COPY . /usr/share/nginx/html/
+
+# Configurar script de entrypoint executável
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
 EXPOSE ${PORT}
 
-CMD sh -c "printf 'server {\n    listen %s;\n    root /usr/share/nginx/html;\n    index index.html;\n    location / {\n        try_files \$uri \$uri/ =404;\n    }\n}\n' \"${PORT}\" > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["nginx", "-g", "daemon off;"]

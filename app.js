@@ -1,12 +1,17 @@
-const state = {
-  dataSource: "dataset",
-  datasetBase: "",
-  datasetFileMap: null,
-  datasetRootPrefix: "",
-  apiBase: "https://coderunner.cin.ufpe.br/api/v4",
-  apiUser: "",
-  apiPassword: "",
-  manifest: null,
+// ============================================================================
+// DOMJUDGE WIZARD - SPA CONTROLLER, AUTH GATE & REVIEW MODULE
+// ============================================================================
+
+const envConfig = window.__ENV__ || {};
+const STORAGE_SESSION_KEY = "domjudge_wizard_auth";
+const EXPIRATION_DAYS = parseInt(envConfig.STORAGE_EXPIRATION_DAYS, 10) || 7; // Parametrizado: padrão 7 dias ou via .env
+
+const globalState = {
+  apiBase: envConfig.DOMJUDGE_API_BASE || "https://coderunner.cin.ufpe.br/api/v4",
+  apiUser: envConfig.DOMJUDGE_API_USER || "",
+  apiPassword: envConfig.DOMJUDGE_API_PASSWORD || "",
+  isAuthenticated: false,
+  activeTab: "review",
   contests: [],
   view: "question",
   selectedContestIds: [],
@@ -16,56 +21,51 @@ const state = {
   filterTeamKey: "all",
   filterStatusIds: ["all"],
   stepIndex: 0,
-  loadedSource: "dataset",
   apiSourceCache: {},
 };
 
-const els = {
-  datasetBase: document.getElementById("datasetBase"),
-  pickDatasetFolderBtn: document.getElementById("pickDatasetFolderBtn"),
-  datasetFolderInput: document.getElementById("datasetFolderInput"),
-  apiBase: document.getElementById("apiBase"),
-  apiUser: document.getElementById("apiUser"),
-  apiPassword: document.getElementById("apiPassword"),
-  dataHint: document.getElementById("dataHint"),
-  datasetFields: document.getElementById("datasetFields"),
-  apiFields: document.getElementById("apiFields"),
-  apiActions: document.getElementById("apiActions"),
-  saveDatasetBtn: document.getElementById("saveDatasetBtn"),
-  exportCsvBtn: document.getElementById("exportCsvBtn"),
-  dataSourceRadios: Array.from(document.querySelectorAll('input[name="dataSource"]')),
-  reloadBtn: document.getElementById("reloadBtn"),
-  status: document.getElementById("status"),
-  results: document.getElementById("results"),
-  contestSelect: document.getElementById("contestSelect"),
-  problemSelect: document.getElementById("problemSelect"),
-  teamSelect: document.getElementById("teamSelect"),
-  statusSelect: document.getElementById("statusSelect"),
-  filterProblemSelect: document.getElementById("filterProblemSelect"),
-  filterTeamSelect: document.getElementById("filterTeamSelect"),
-  viewButtons: Array.from(document.querySelectorAll(".view-btn")),
-  controls: Array.from(document.querySelectorAll(".control")),
+// ============================================================================
+// SISTEMA GLOBAL DE NOTIFICAÇÕES (TOASTS)
+// ============================================================================
+window.showToast = function (message, type = "info", duration = 4000) {
+  const container = document.getElementById("toastContainer");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+
+  const iconMap = {
+    success: "✅",
+    error: "❌",
+    warning: "⚠️",
+    info: "ℹ️",
+  };
+
+  toast.innerHTML = `
+    <span>${iconMap[type] || "ℹ️"}</span>
+    <div style="flex: 1; line-height: 1.3;">${String(message).replace(/[<>]/g, "")}</div>
+  `;
+
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(12px) scale(0.95)";
+    setTimeout(() => toast.remove(), 250);
+  }, duration);
 };
 
-const viewControlMap = {
-  question: ["contest", "problem", "status"],
-  student: ["team", "status"],
-  contest: ["contest", "filterProblem", "filterTeam", "status"],
-  step: ["contest", "problem", "status"],
-  summary: ["contest", "problem", "status"],
+// ============================================================================
+// GESTÃO DE SESSÃO & CREDENCIAIS DA API
+// ============================================================================
+window.getApiCredentials = function () {
+  return {
+    apiBase: normalizeApiBase(globalState.apiBase),
+    user: globalState.apiUser,
+    password: globalState.apiPassword,
+    isAuthenticated: globalState.isAuthenticated,
+  };
 };
-
-function setStatus(message) {
-  els.status.textContent = message;
-}
-
-function sanitize(text) {
-  return String(text ?? "").replace(/[<>]/g, "");
-}
-
-function normalizeStatus(value) {
-  return String(value || "").trim().toLowerCase();
-}
 
 function normalizeApiBase(url) {
   const cleaned = String(url || "").trim().replace(/\/+$/, "");
@@ -77,6 +77,210 @@ function buildBasicAuthHeader(user, password) {
   return `Basic ${btoa(`${user}:${password}`)}`;
 }
 
+function saveStoredSession(apiBase, user, password, remember = true) {
+  const sessionData = {
+    apiBase,
+    user,
+    password,
+    savedAt: Date.now(),
+    expiresAt: Date.now() + EXPIRATION_DAYS * 24 * 60 * 60 * 1000,
+  };
+
+  if (remember) {
+    try {
+      localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(sessionData));
+    } catch (e) {
+      console.warn("Falha ao salvar no localStorage:", e);
+    }
+  } else {
+    try {
+      sessionStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(sessionData));
+      localStorage.removeItem(STORAGE_SESSION_KEY);
+    } catch (e) {
+      console.warn("Falha ao salvar no sessionStorage:", e);
+    }
+  }
+}
+
+function loadStoredSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_SESSION_KEY) || sessionStorage.getItem(STORAGE_SESSION_KEY);
+    if (!raw) return null;
+
+    const data = JSON.parse(raw);
+    if (data.expiresAt && Date.now() > data.expiresAt) {
+      localStorage.removeItem(STORAGE_SESSION_KEY);
+      sessionStorage.removeItem(STORAGE_SESSION_KEY);
+      return null;
+    }
+
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
+window.handleApiUnauthorized = function (detail) {
+  console.warn("API retornou HTTP 401 (Não autorizado). Solicitando novas credenciais para gerar novo token...", detail);
+  globalState.isAuthenticated = false;
+  updateSessionBar();
+
+  const feedback = document.getElementById("authStatusFeedback");
+  if (feedback) {
+    feedback.textContent = "Sessão expirada ou não autorizada (HTTP 401). Informe usuário e senha para gerar um novo token.";
+    feedback.style.color = "var(--danger)";
+  }
+
+  const pwd = document.getElementById("authApiPassword");
+  if (pwd) pwd.value = "";
+
+  showAuthGate(true);
+  if (pwd) pwd.focus();
+
+  if (typeof window.showToast === "function") {
+    window.showToast("Sessão da API expirada (HTTP 401). Informe as credenciais para gerar um novo token.", "warning");
+  }
+};
+
+function clearStoredSession() {
+  localStorage.removeItem(STORAGE_SESSION_KEY);
+  sessionStorage.removeItem(STORAGE_SESSION_KEY);
+  globalState.isAuthenticated = false;
+  globalState.apiUser = "";
+  globalState.apiPassword = "";
+  updateSessionBar();
+  showAuthGate(true);
+}
+
+function updateSessionBar() {
+  const userLabel = document.getElementById("sessionUserLabel");
+  const sessionDot = document.getElementById("sessionDot");
+
+  if (userLabel) {
+    userLabel.textContent = globalState.isAuthenticated
+      ? `${globalState.apiUser || "API"} (${globalState.apiBase.replace(/^https?:\/\//, "").split("/")[0]})`
+      : "Desconectado";
+  }
+
+  if (sessionDot) {
+    sessionDot.className = globalState.isAuthenticated ? "status-dot" : "status-dot disconnected";
+  }
+}
+
+function showAuthGate(show = true) {
+  const gate = document.getElementById("authGate");
+  if (gate) {
+    gate.hidden = !show;
+  }
+}
+
+async function validateApiCredentials(apiBase, user, password) {
+  const url = `${normalizeApiBase(apiBase)}/user`;
+  const headers = {
+    Accept: "application/json",
+  };
+  if (user && password) {
+    headers["Authorization"] = buildBasicAuthHeader(user, password);
+  }
+
+  const res = await fetch(url, { headers });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error("Usuário ou senha inválidos no DOMjudge.");
+  }
+  if (!res.ok && res.status !== 404) {
+    // Tentar /contests como fallback se /user não existir
+    const contestsRes = await fetch(`${normalizeApiBase(apiBase)}/contests`, { headers });
+    if (!contestsRes.ok) {
+      throw new Error(`Erro de conexão com o DOMjudge (HTTP ${res.status}).`);
+    }
+  }
+  return true;
+}
+
+// ============================================================================
+// ROTEADOR SPA & GESTÃO DE ABAS
+// ============================================================================
+function switchTab(tabId, pushHash = true) {
+  globalState.activeTab = tabId;
+
+  // Atualizar botões da Navbar
+  document.querySelectorAll(".app-tab-btn").forEach((btn) => {
+    const isTarget = btn.getAttribute("data-tab") === tabId;
+    btn.classList.toggle("active", isTarget);
+    btn.setAttribute("aria-selected", isTarget ? "true" : "false");
+  });
+
+  // Alternar contêineres de view
+  document.querySelectorAll(".spa-view").forEach((view) => {
+    view.classList.toggle("active", view.id === `view-${tabId}`);
+  });
+
+  if (pushHash && window.location.hash !== `#${tabId}`) {
+    window.location.hash = `#${tabId}`;
+  }
+
+  // Ações ao entrar em cada aba
+  if (tabId === "contests" && window.ContestManagerModule) {
+    window.ContestManagerModule.loadContests();
+  } else if (tabId === "users" && window.UsersModule) {
+    window.UsersModule.loadUsers();
+  } else if (tabId === "review" && globalState.contests.length === 0) {
+    loadReviewDataFromApi();
+  }
+}
+
+function handleHashChange() {
+  const hash = window.location.hash.replace(/^#/, "");
+  const validTabs = ["review", "creator", "contests", "users"];
+  if (validTabs.includes(hash)) {
+    switchTab(hash, false);
+  } else {
+    switchTab("review", false);
+  }
+}
+
+// ============================================================================
+// MÓDULO 1: VISUALIZAÇÃO E REVIEW DE SUBMISSÕES
+// ============================================================================
+const els = {
+  reloadSubmissionsBtn: document.getElementById("reloadSubmissionsBtn"),
+  exportCsvBtn: document.getElementById("exportCsvBtn"),
+  saveDatasetBtn: document.getElementById("saveDatasetBtn"),
+  reviewStatusMessage: document.getElementById("reviewStatusMessage"),
+  results: document.getElementById("results"),
+  contestSelect: document.getElementById("contestSelect"),
+  problemSelect: document.getElementById("problemSelect"),
+  teamSelect: document.getElementById("teamSelect"),
+  statusSelect: document.getElementById("statusSelect"),
+  filterProblemSelect: document.getElementById("filterProblemSelect"),
+  filterTeamSelect: document.getElementById("filterTeamSelect"),
+  viewButtons: Array.from(document.querySelectorAll(".review-subnav-btn")),
+  controls: Array.from(document.querySelectorAll(".control-item")),
+};
+
+const viewControlMap = {
+  question: ["contest", "problem", "status"],
+  student: ["team", "status"],
+  contest: ["contest", "filterProblem", "filterTeam", "status"],
+  step: ["contest", "problem", "status"],
+  summary: ["contest", "problem", "status"],
+};
+
+function setReviewStatus(message, isError = false) {
+  if (els.reviewStatusMessage) {
+    els.reviewStatusMessage.textContent = message;
+    els.reviewStatusMessage.style.color = isError ? "var(--danger)" : "var(--ink-secondary)";
+  }
+}
+
+function sanitize(text) {
+  return String(text ?? "").replace(/[<>]/g, "");
+}
+
+function normalizeStatus(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function getSubmissionStatus(submission) {
   return normalizeStatus(submission.judgement_label || submission.status || "pending");
 }
@@ -84,11 +288,25 @@ function getSubmissionStatus(submission) {
 function isAccepted(submission) {
   const status = normalizeStatus(submission.status);
   const label = normalizeStatus(submission.judgement_label);
-  return status === "ac" || status === "accepted" || status === "correct" || label.includes("accepted") || label.includes("correct");
+  return (
+    status === "ac" ||
+    status === "accepted" ||
+    status === "correct" ||
+    label.includes("accepted") ||
+    label.includes("correct")
+  );
 }
 
 function submissionTimeKey(submission) {
-  return submission.time || submission.submission_time || submission.submit_time || submission.start_time || submission.end_time || submission.id || 0;
+  return (
+    submission.time ||
+    submission.submission_time ||
+    submission.submit_time ||
+    submission.start_time ||
+    submission.end_time ||
+    submission.id ||
+    0
+  );
 }
 
 function sortSubmissions(submissions) {
@@ -125,30 +343,32 @@ function contestProblemKey(contestId, problemId) {
 
 function getContestById(id) {
   const target = String(id);
-  return state.contests.find((contest) => String(contest.meta.id) === target || String(contest.meta.cid) === target);
+  return globalState.contests.find(
+    (contest) => String(contest.meta.id) === target || String(contest.meta.cid) === target
+  );
 }
 
 function getSelectedValues(selectEl) {
-  return Array.from(selectEl.selectedOptions).map((option) => option.value).filter(Boolean);
+  return Array.from(selectEl.selectedOptions).map((opt) => opt.value).filter(Boolean);
 }
 
 function getSelectedContests() {
-  if (!state.selectedContestIds.length) return state.contests;
-  return state.selectedContestIds.map((id) => getContestById(id)).filter(Boolean);
+  if (!globalState.selectedContestIds.length) return globalState.contests;
+  return globalState.selectedContestIds.map((id) => getContestById(id)).filter(Boolean);
 }
 
 function getProblemLabel(problem) {
-  return problem.shortname || problem.name || problem.id || "Questao";
+  return problem.shortname || problem.name || problem.id || "Questão";
 }
 
 function filterByStatus(submissions) {
-  if (state.filterStatusIds.includes("all")) return submissions;
-  return submissions.filter((submission) => state.filterStatusIds.includes(getSubmissionStatus(submission)));
+  if (globalState.filterStatusIds.includes("all")) return submissions;
+  return submissions.filter((s) => globalState.filterStatusIds.includes(getSubmissionStatus(s)));
 }
 
 function shouldIncludeByStatus(originalSubmissions, filteredSubmissions) {
-  if (state.filterStatusIds.includes("all")) return true;
-  if (!originalSubmissions.length) return state.filterStatusIds.includes("not_submitted");
+  if (globalState.filterStatusIds.includes("all")) return true;
+  if (!originalSubmissions.length) return globalState.filterStatusIds.includes("not_submitted");
   return filteredSubmissions.length > 0;
 }
 
@@ -157,13 +377,14 @@ function finalSubmission(submissions) {
   return ordered[0] || null;
 }
 
-function decodeSourceContent(value, { forceBase64 = false } = {}) {
+function decodeSourceContent(value) {
   const text = String(value ?? "");
   const trimmed = text.trim();
   if (!trimmed) return text;
 
   let candidate = trimmed;
   const dataUriMatch = candidate.match(/^data:[^,]*;base64,(.*)$/i);
+  let forceBase64 = false;
   if (dataUriMatch) {
     candidate = dataUriMatch[1];
     forceBase64 = true;
@@ -181,29 +402,14 @@ function decodeSourceContent(value, { forceBase64 = false } = {}) {
   try {
     const binary = atob(candidate);
     const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-    let decoded;
-
     try {
-      decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } catch (_utf8Error) {
-      decoded = binary;
+      return binary;
     }
-
-    if (!forceBase64 && /[^\x09\x0A\x0D\x20-\x7E\u00A0-\u00FF]/.test(decoded)) {
-      return text;
-    }
-    return decoded;
   } catch (_error) {
     return text;
   }
-}
-
-function extractSourceValue(entry) {
-  const raw = entry?.source ?? entry?.content ?? entry?.data ?? entry?.code ?? entry?.text ?? "";
-  if (raw && typeof raw === "object") {
-    return raw.source ?? raw.content ?? raw.data ?? raw.code ?? raw.text ?? "";
-  }
-  return raw;
 }
 
 function parseSourcePayload(payload) {
@@ -211,176 +417,140 @@ function parseSourcePayload(payload) {
   if (Array.isArray(payload)) {
     items = payload.filter((entry) => entry && typeof entry === "object");
   } else if (payload && typeof payload === "object") {
-    if (Array.isArray(payload.files)) items = payload.files.filter((entry) => entry && typeof entry === "object");
-    else if (Array.isArray(payload.source)) items = payload.source.filter((entry) => entry && typeof entry === "object");
+    if (Array.isArray(payload.files)) items = payload.files.filter((e) => e && typeof e === "object");
+    else if (Array.isArray(payload.source)) items = payload.source.filter((e) => e && typeof e === "object");
   }
 
   return items.map((entry) => {
     const filename = String(entry.filename || entry.name || "source.txt");
-    const forceBase64 =
-      entry?.base64 === true ||
-      entry?.is_base64 === true ||
-      String(entry?.encoding || "").toLowerCase() === "base64" ||
-      String(entry?.content_transfer_encoding || "").toLowerCase() === "base64";
-    const source = decodeSourceContent(extractSourceValue(entry), { forceBase64 });
+    const rawCode = entry?.source ?? entry?.content ?? entry?.data ?? entry?.code ?? entry?.text ?? "";
+    const source = decodeSourceContent(rawCode);
     return { filename, source };
   });
 }
 
-function buildDatasetFileSelection(fileList) {
-  const files = Array.from(fileList || []);
-  const fileMap = new Map();
-
-  files.forEach((file) => {
-    const relPath = String(file.webkitRelativePath || file.name || "").replace(/^\/+/, "");
-    if (!relPath) return;
-    fileMap.set(relPath, file);
-  });
-
-  let prefix = "";
-  for (const relPath of fileMap.keys()) {
-    if (relPath.endsWith("dataset_manifest.json")) {
-      prefix = relPath.slice(0, relPath.length - "dataset_manifest.json".length);
-      break;
-    }
-  }
-
-  const rootLabel = files[0]?.webkitRelativePath ? files[0].webkitRelativePath.split("/")[0] : "";
-  return { fileMap, prefix, rootLabel };
-}
-
-function getDatasetFile(relPath) {
-  if (!state.datasetFileMap) return null;
-  const clean = String(relPath || "").replace(/^\/+/, "");
-  return state.datasetFileMap.get(`${state.datasetRootPrefix}${clean}`) || null;
-}
-
-async function readDatasetText(relPath) {
-  const fromFile = getDatasetFile(relPath);
-  if (fromFile) return fromFile.text();
-
-  if (!state.datasetBase) {
-    throw new Error("selecione uma pasta de dataset");
-  }
-
-  const response = await fetch(`${state.datasetBase}/${String(relPath || "").replace(/^\/+/, "")}`);
-  if (!response.ok) throw new Error(`nao foi possivel ler ${relPath}`);
-  return response.text();
-}
-
-async function readDatasetJson(relPath) {
-  const text = await readDatasetText(relPath);
-  return JSON.parse(text);
-}
-
 async function fetchApiJson(path) {
-  const apiBase = normalizeApiBase(state.apiBase);
-  const user = String(state.apiUser || "").trim();
-  const password = state.apiPassword || "";
-
-  if (!apiBase || !user || !password) {
-    throw new Error("Preencha API base, usuario e senha para usar a API.");
+  const creds = window.getApiCredentials();
+  if (!creds || !creds.apiBase) {
+    throw new Error("Sessão da API não disponível.");
   }
 
-  const response = await fetch(`${apiBase}/${path.replace(/^\/+/, "")}`, {
-    headers: {
-      Accept: "application/json",
-      Authorization: buildBasicAuthHeader(user, password),
-    },
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Falha API (${response.status}): ${text || "sem detalhe"}`);
+  const headers = { Accept: "application/json" };
+  if (creds.user && creds.password) {
+    headers["Authorization"] = buildBasicAuthHeader(creds.user, creds.password);
   }
 
-  const raw = await response.text();
+  const res = await fetch(`${creds.apiBase}/${path.replace(/^\/+/, "")}`, { headers });
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      if (typeof window.handleApiUnauthorized === "function") {
+        window.handleApiUnauthorized(new Error(`API HTTP ${res.status}: Sessão expirada.`));
+      }
+    }
+    const text = await res.text().catch(() => "");
+    throw new Error(`Falha API (${res.status}): ${text || res.statusText}`);
+  }
+
+  const raw = await res.text();
   return raw.trim() ? JSON.parse(raw) : null;
 }
 
-async function fetchCodeFromDataset(contest, submission, file) {
-  return readDatasetText(`${contest.folder}/sources/${submission.id}/${file}`);
-}
-
-async function fetchCodeFromApi(contest, submission, file) {
+async function fetchSourceCode(contest, submission, file) {
   const contestId = contest.meta.id || contest.meta.cid;
   const cacheKey = `${contestId}::${submission.id}`;
-  let files = state.apiSourceCache[cacheKey];
+  let files = globalState.apiSourceCache[cacheKey];
 
   if (!files) {
-    const payload = await fetchApiJson(`contests/${encodeURIComponent(contestId)}/submissions/${encodeURIComponent(submission.id)}/source-code`);
+    const payload = await fetchApiJson(
+      `contests/${encodeURIComponent(contestId)}/submissions/${encodeURIComponent(submission.id)}/source-code`
+    );
     files = parseSourcePayload(payload);
-    state.apiSourceCache[cacheKey] = files;
+    globalState.apiSourceCache[cacheKey] = files;
   }
 
   const fileEntry = files.find((entry) => entry.filename === file) || files[0];
-  if (!fileEntry) throw new Error("arquivo de codigo nao encontrado na API");
+  if (!fileEntry) throw new Error("Arquivo de código não encontrado na API.");
   return fileEntry.source;
-}
-
-async function fetchSourceCode(contest, submission, file) {
-  if (state.dataSource === "api") {
-    return fetchCodeFromApi(contest, submission, file);
-  }
-  return fetchCodeFromDataset(contest, submission, file);
 }
 
 function buildSubmissionElement(contest, submission) {
   const container = document.createElement("div");
-  container.className = "submission" + (isAccepted(submission) ? " accepted" : "");
+  const accepted = isAccepted(submission);
+  container.className = `submission-card ${accepted ? "accepted" : ""}`;
 
   const statusLabel = submission.judgement_label || submission.status || "pending";
   const metaTime = submissionTimeKey(submission);
-  const lang = submission.language_id || submission.language || "";
+  const lang = submission.language_id || submission.language || "code";
+
+  const badgeClass = accepted ? "badge-ac" : (statusLabel.toLowerCase().includes("wrong") ? "badge-wa" : "badge-dim");
 
   container.innerHTML = `
-    <div class="submission-header">
-      <div>
-        <strong>${sanitize(statusLabel)}</strong>
-        ${isAccepted(submission) ? '<span class="badge">correta</span>' : ""}
+    <div class="submission-head">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span class="badge ${badgeClass}">${sanitize(statusLabel)}</span>
+        ${accepted ? '<span class="pill pill-role">⭐ Solução Aceita</span>' : ""}
       </div>
       <div class="submission-meta">
-        <span>${sanitize(lang)}</span>
-        <span>${sanitize(metaTime)}</span>
+        <span class="pill">${sanitize(lang)}</span>
+        <span>🕒 ${sanitize(metaTime)}</span>
+        <span>ID: ${sanitize(submission.id)}</span>
       </div>
     </div>
-    <div class="file-list"></div>
-    <div class="code-block" hidden>
-      <div class="code-toolbar"><button class="badge dim close-code" type="button">Fechar codigo</button></div>
-      <pre><code class="language-cpp"></code></pre>
+    <div class="file-list" style="margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap;"></div>
+    <div class="code-viewer-container" hidden>
+      <div class="code-viewer-toolbar">
+        <div class="file-info">
+          <span>📄</span>
+          <strong class="code-file-name">source.cpp</strong>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button type="button" class="btn-sm dim copy-code-btn">📋 Copiar</button>
+          <button type="button" class="btn-sm dim close-code-btn">✕ Fechar</button>
+        </div>
+      </div>
+      <div class="code-viewer-body">
+        <pre><code class="language-cpp"></code></pre>
+      </div>
     </div>
   `;
 
   const fileList = container.querySelector(".file-list");
-  const codeBlock = container.querySelector(".code-block");
+  const codeViewer = container.querySelector(".code-viewer-container");
   const codeEl = container.querySelector("code");
-  const closeBtn = container.querySelector(".close-code");
+  const fileNameEl = container.querySelector(".code-file-name");
+  const closeBtn = container.querySelector(".close-code-btn");
+  const copyBtn = container.querySelector(".copy-code-btn");
 
   closeBtn.addEventListener("click", () => {
-    codeBlock.hidden = true;
+    codeViewer.hidden = true;
     codeEl.textContent = "";
   });
 
-  const files = Array.isArray(submission.source_files) ? submission.source_files : [];
-  if (!files.length) {
-    fileList.textContent = "Sem arquivos de codigo.";
-    return container;
-  }
+  copyBtn.addEventListener("click", () => {
+    navigator.clipboard.writeText(codeEl.textContent).then(() => {
+      showToast("Código copiado para a área de transferência!", "success");
+    });
+  });
+
+  const files = Array.isArray(submission.source_files) ? submission.source_files : ["source.cpp"];
 
   files.forEach((file) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = file;
-    button.className = "badge dim";
+    button.textContent = `💻 Ver ${file}`;
+    button.className = "dim btn-sm";
     button.addEventListener("click", async () => {
-      codeBlock.hidden = false;
-      codeEl.textContent = "Carregando...";
+      codeViewer.hidden = false;
+      fileNameEl.textContent = file;
+      codeEl.textContent = "Carregando código da API...";
       try {
         const text = await fetchSourceCode(contest, submission, file);
         codeEl.textContent = decodeSourceContent(text);
-        hljs.highlightElement(codeEl);
+        if (window.hljs) {
+          window.hljs.highlightElement(codeEl);
+        }
       } catch (error) {
-        codeEl.textContent = `Erro ao carregar: ${error.message}`;
+        codeEl.textContent = `Erro ao carregar código: ${error.message}`;
       }
     });
     fileList.appendChild(button);
@@ -397,21 +567,28 @@ function buildTeamCard(contest, team, problem, submissions) {
   const first = ordered[0];
 
   card.innerHTML = `
-    <h3>${sanitize(team.name || team.id)}</h3>
-    <small>${sanitize(formatContestLabel(contest))} · ${sanitize(getProblemLabel(problem))}</small>
-    <div class="submissions"></div>
+    <div class="card-header" style="margin-bottom: 12px;">
+      <div>
+        <h3 class="card-title">${sanitize(team.name || team.id)}</h3>
+        <p class="form-hint" style="font-size: 0.82rem;">${sanitize(formatContestLabel(contest))} · <strong>${sanitize(getProblemLabel(problem))}</strong></p>
+      </div>
+      <div>
+        <span class="pill pill-category">${submissions.length} envio(s)</span>
+      </div>
+    </div>
+    <div class="submissions-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
   `;
 
-  const submissionsEl = card.querySelector(".submissions");
+  const submissionsEl = card.querySelector(".submissions-list");
   if (first) {
     submissionsEl.appendChild(buildSubmissionElement(contest, first));
   } else {
     const empty = document.createElement("div");
-    empty.className = "submission";
+    empty.className = "submission-card";
     empty.innerHTML = `
-      <div class="submission-header">
-        <div><strong>Nao submetido</strong></div>
-        <div class="submission-meta"><span class="badge dim">sem envios</span></div>
+      <div class="submission-head">
+        <div><strong>Não submetido</strong></div>
+        <div class="submission-meta"><span class="badge badge-dim">Sem envios</span></div>
       </div>
     `;
     submissionsEl.appendChild(empty);
@@ -420,18 +597,19 @@ function buildTeamCard(contest, team, problem, submissions) {
   if (ordered.length > 1) {
     const toggle = document.createElement("button");
     toggle.type = "button";
-    toggle.textContent = `Ver mais ${ordered.length - 1} submissao(oes)`;
-    toggle.className = "badge dim";
+    toggle.textContent = `👁️ Ver mais ${ordered.length - 1} submissão(ões) anteriores`;
+    toggle.className = "dim btn-sm";
+    toggle.style.marginTop = "8px";
     let expanded = false;
 
     toggle.addEventListener("click", () => {
       expanded = !expanded;
       if (expanded) {
-        toggle.textContent = "Ocultar submisssoes extras";
+        toggle.textContent = "▲ Ocultar submissões anteriores";
         ordered.slice(1).forEach((entry) => submissionsEl.appendChild(buildSubmissionElement(contest, entry)));
       } else {
-        toggle.textContent = `Ver mais ${ordered.length - 1} submissao(oes)`;
-        submissionsEl.querySelectorAll(".submission").forEach((el, idx) => {
+        toggle.textContent = `👁️ Ver mais ${ordered.length - 1} submissão(ões) anteriores`;
+        submissionsEl.querySelectorAll(".submission-card").forEach((el, idx) => {
           if (idx > 0) el.remove();
         });
       }
@@ -458,19 +636,29 @@ function buildSubmissionIndex(contest) {
 function collectRows() {
   const rows = [];
   const selectedContests = getSelectedContests();
-  const allProblems = state.selectedProblemIds.includes("all");
+  const allProblems = globalState.selectedProblemIds.includes("all");
 
   selectedContests.forEach((contest) => {
     const contestId = contest.meta.id || contest.meta.cid;
     const problems = contest.problems.filter((problem) => {
       if (allProblems) return true;
-      return state.selectedProblemIds.includes(contestProblemKey(contestId, String(problem.id)));
+      return globalState.selectedProblemIds.includes(contestProblemKey(contestId, String(problem.id)));
     });
 
     problems.forEach((problem) => {
       sortedTeams(contest).forEach((team) => {
-        if (state.view === "contest" && state.filterTeamKey !== "all" && String(team.id) !== state.filterTeamKey) return;
-        if (state.view === "contest" && !state.filterProblemIds.includes("all") && !state.filterProblemIds.includes(contestProblemKey(contestId, String(problem.id)))) return;
+        if (
+          globalState.view === "contest" &&
+          globalState.filterTeamKey !== "all" &&
+          String(team.id) !== globalState.filterTeamKey
+        )
+          return;
+        if (
+          globalState.view === "contest" &&
+          !globalState.filterProblemIds.includes("all") &&
+          !globalState.filterProblemIds.includes(contestProblemKey(contestId, String(problem.id)))
+        )
+          return;
 
         const key = `${team.id}::${problem.id}`;
         const originalSubmissions = contest.submissionIndex[key] || [];
@@ -494,23 +682,25 @@ function collectRows() {
 
 function renderQuestionView() {
   const rows = collectRows();
-  setStatus(`${rows.length} combinacao(oes) de questao/estudante.`);
-  els.results.replaceChildren(...rows.map((row) => buildTeamCard(row.contest, row.team, row.problem, row.submissions)));
+  setReviewStatus(`${rows.length} combinação(ões) de questão/estudante.`);
+  els.results.replaceChildren(
+    ...rows.map((row) => buildTeamCard(row.contest, row.team, row.problem, row.submissions))
+  );
 }
 
 function renderStudentView() {
-  const contestTeam = state.selectedTeamKey || "";
+  const contestTeam = globalState.selectedTeamKey || "";
   const [contestId, teamId] = contestTeam.split("::");
   const contest = getContestById(contestId);
   if (!contest || !teamId) {
-    setStatus("Selecione um estudante (team).");
+    setReviewStatus("Selecione um estudante no menu acima.");
     els.results.replaceChildren();
     return;
   }
 
   const team = contest.teams.find((entry) => String(entry.id) === teamId);
   if (!team) {
-    setStatus("Team nao encontrado.");
+    setReviewStatus("Estudante não encontrado.");
     els.results.replaceChildren();
     return;
   }
@@ -524,656 +714,451 @@ function renderStudentView() {
     cards.push(buildTeamCard(contest, team, problem, submissions));
   });
 
-  setStatus(`${cards.length} questao(oes) para ${team.name || team.id}.`);
+  setReviewStatus(`${cards.length} questão(ões) para ${team.name || team.id}.`);
   els.results.replaceChildren(...cards);
 }
 
 function renderContestView() {
   const rows = collectRows();
-  setStatus(`${rows.length} combinacao(oes) de questao/team.`);
-  els.results.replaceChildren(...rows.map((row) => buildTeamCard(row.contest, row.team, row.problem, row.submissions)));
+  setReviewStatus(`${rows.length} combinação(ões) de questão/team.`);
+  els.results.replaceChildren(
+    ...rows.map((row) => buildTeamCard(row.contest, row.team, row.problem, row.submissions))
+  );
 }
 
 function renderStepView() {
   const rows = collectRows();
   if (!rows.length) {
-    setStatus("Nenhuma resposta com os filtros atuais.");
+    setReviewStatus("Nenhuma submissão corresponde aos filtros atuais.");
     els.results.replaceChildren();
     return;
   }
 
-  if (state.stepIndex >= rows.length) state.stepIndex = rows.length - 1;
-  if (state.stepIndex < 0) state.stepIndex = 0;
+  if (globalState.stepIndex >= rows.length) globalState.stepIndex = rows.length - 1;
+  if (globalState.stepIndex < 0) globalState.stepIndex = 0;
 
   const nav = document.createElement("div");
-  nav.className = "step-nav";
+  nav.className = "step-navbar";
   nav.innerHTML = `
-    <button type="button" class="badge dim" id="prevStep">Anterior</button>
-    <span class="counter">${state.stepIndex + 1} de ${rows.length}</span>
-    <button type="button" class="badge dim" id="nextStep">Proximo</button>
+    <div class="step-info">
+      <span class="step-counter">${globalState.stepIndex + 1} / ${rows.length}</span>
+      <span class="step-keyboard-hint">Navegue com as setas <kbd>←</kbd> e <kbd>→</kbd></span>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button type="button" class="dim btn-sm" id="prevStepBtn" ${globalState.stepIndex <= 0 ? "disabled" : ""}>◀ Anterior</button>
+      <button type="button" class="primary btn-sm" id="nextStepBtn" ${globalState.stepIndex >= rows.length - 1 ? "disabled" : ""}>Próximo ▶</button>
+    </div>
   `;
 
-  nav.querySelector("#prevStep").addEventListener("click", () => {
-    state.stepIndex = Math.max(0, state.stepIndex - 1);
+  nav.querySelector("#prevStepBtn").addEventListener("click", () => {
+    globalState.stepIndex = Math.max(0, globalState.stepIndex - 1);
     renderStepView();
   });
-  nav.querySelector("#nextStep").addEventListener("click", () => {
-    state.stepIndex = Math.min(rows.length - 1, state.stepIndex + 1);
+  nav.querySelector("#nextStepBtn").addEventListener("click", () => {
+    globalState.stepIndex = Math.min(rows.length - 1, globalState.stepIndex + 1);
     renderStepView();
   });
 
-  const row = rows[state.stepIndex];
+  const row = rows[globalState.stepIndex];
   const card = buildTeamCard(row.contest, row.team, row.problem, row.submissions);
-  setStatus("Visualizacao individual por estudante/questao.");
+  setReviewStatus("Modo Aluno por Vez: navegação focada estudante a estudante.");
   els.results.replaceChildren(nav, card);
 }
 
 function renderSummaryView() {
   const rows = collectRows();
   const list = document.createElement("div");
-  list.className = "summary-list";
+  list.className = "results-grid";
 
   rows.forEach((row) => {
     const final = finalSubmission(row.submissions);
     const accepted = final ? isAccepted(final) : false;
     const item = document.createElement("article");
-    item.className = "summary-item" + (accepted ? " accepted" : "");
+    item.className = `submission-card ${accepted ? "accepted" : ""}`;
     item.innerHTML = `
-      <div class="summary-main">
-        <strong>${sanitize(row.team.name || row.team.id)}</strong>
-        <small>${sanitize(formatContestLabel(row.contest))} · ${sanitize(getProblemLabel(row.problem))}</small>
+      <div class="submission-head">
+        <div>
+          <strong style="font-size: 1rem;">${sanitize(row.team.name || row.team.id)}</strong>
+          <div class="form-hint">${sanitize(formatContestLabel(row.contest))} · ${sanitize(getProblemLabel(row.problem))}</div>
+        </div>
+        <span class="badge ${accepted ? "badge-ac" : "badge-dim"}">${accepted ? "ACCEPTED" : sanitize(final?.judgement_label || final?.status || "NÃO SUBMETIDO")}</span>
       </div>
-      <span class="badge ${accepted ? "" : "dim"}">${accepted ? "accepted" : sanitize(final?.judgement_label || final?.status || "nao submetido")}</span>
     `;
     list.appendChild(item);
   });
 
-  setStatus(`${list.children.length} resumo(s) de resposta final.`);
+  setReviewStatus(`${list.children.length} resumo(s) de resposta final.`);
   els.results.replaceChildren(list);
 }
 
 function renderView() {
-  if (state.view === "question") return renderQuestionView();
-  if (state.view === "student") return renderStudentView();
-  if (state.view === "contest") return renderContestView();
-  if (state.view === "step") return renderStepView();
+  if (globalState.view === "question") return renderQuestionView();
+  if (globalState.view === "student") return renderStudentView();
+  if (globalState.view === "contest") return renderContestView();
+  if (globalState.view === "step") return renderStepView();
   return renderSummaryView();
 }
 
 function updateControlsVisibility() {
   els.controls.forEach((control) => {
     const key = control.dataset.control;
-    control.style.display = (viewControlMap[state.view] || []).includes(key) ? "grid" : "none";
+    control.style.display = (viewControlMap[globalState.view] || []).includes(key) ? "flex" : "none";
   });
 }
 
-function updateSourceControlsVisibility() {
-  const isApi = state.dataSource === "api";
-  els.datasetFields.style.display = isApi ? 'none' : '';
-  els.apiFields.style.display = isApi ? '' : 'none';
-  if (els.apiActions) {
-    els.apiActions.style.display = !(isApi && state.loadedSource === "api") ? 'none' : '';
-  }
-  els.reloadBtn.textContent = isApi ? "Carregar da API" : "Carregar dataset";
-  if (els.exportCsvBtn) {
-    els.exportCsvBtn.disabled = !state.contests.length;
-  }
-  if (els.saveDatasetBtn) {
-    const canSave = isApi && state.loadedSource === "api" && state.contests.length > 0;
-    els.saveDatasetBtn.disabled = !canSave;
-  }
-  els.dataHint.textContent = isApi
-    ? "Mostra apenas os campos da API. Use credenciais com permissao para ler contests e submisssoes."
-    : "Use um servidor local para permitir fetch dos arquivos JSON.";
-}
+function updateDropdowns() {
+  // Contests
+  els.contestSelect.innerHTML = globalState.contests
+    .map((c) => `<option value="${sanitize(c.meta.id || c.meta.cid)}" selected>${sanitize(formatContestLabel(c))}</option>`)
+    .join("");
 
-function slugify(text) {
-  return String(text || "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "contest";
-}
+  globalState.selectedContestIds = globalState.contests.map((c) => String(c.meta.id || c.meta.cid));
 
-function contestFolderName(contest) {
-  const id = String(contest.meta.id || contest.meta.cid || "contest");
-  const slugBase = contest.meta.shortname || contest.meta.name || id;
-  return `${id}-${slugify(slugBase)}`;
-}
-
-function triggerBlobDownload(blob, filename) {
-  const link = document.createElement("a");
-  const url = URL.createObjectURL(blob);
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function csvEscape(value) {
-  const text = String(value ?? "");
-  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
-}
-
-function buildContestCsv(contest) {
-  const header = ["team", ...contest.problems.map((problem) => getProblemLabel(problem))];
-  const lines = [header.map(csvEscape).join(",")];
-
-  sortedTeams(contest).forEach((team) => {
-    const row = [team.name || team.id];
-    contest.problems.forEach((problem) => {
-      const key = `${team.id}::${problem.id}`;
-      const submissions = contest.submissionIndex[key] || [];
-      const final = finalSubmission(submissions);
-      const value = final ? (final.judgement_label || final.status || "submetido") : "nao submetido";
-      row.push(value);
+  // Problems
+  const problemOptions = ['<option value="all" selected>Todas as questões</option>'];
+  globalState.contests.forEach((c) => {
+    const cId = c.meta.id || c.meta.cid;
+    c.problems.forEach((p) => {
+      problemOptions.push(
+        `<option value="${sanitize(contestProblemKey(cId, String(p.id)))}">${sanitize(getProblemLabel(p))} (${sanitize(c.meta.shortname || cId)})</option>`
+      );
     });
-    lines.push(row.map(csvEscape).join(","));
   });
+  els.problemSelect.innerHTML = problemOptions.join("");
+  els.filterProblemSelect.innerHTML = problemOptions.join("");
 
-  return `${lines.join("\n")}\n`;
+  // Teams
+  const teamOptions = ['<option value="all">Todos os estudantes</option>'];
+  globalState.contests.forEach((c) => {
+    const cId = c.meta.id || c.meta.cid;
+    sortedTeams(c).forEach((t) => {
+      teamOptions.push(
+        `<option value="${sanitize(contestTeamKey(cId, String(t.id)))}">${sanitize(t.name || t.id)} (${sanitize(c.meta.shortname || cId)})</option>`
+      );
+    });
+  });
+  els.teamSelect.innerHTML = teamOptions.slice(1).join("");
+  els.filterTeamSelect.innerHTML = teamOptions.join("");
+
+  // Statuses
+  const statuses = new Set(["all", "correct", "wrong-answer", "timelimit", "memory-limit", "not_submitted"]);
+  els.statusSelect.innerHTML = Array.from(statuses)
+    .map((s) => `<option value="${sanitize(s)}" ${s === "all" ? "selected" : ""}>${sanitize(s)}</option>`)
+    .join("");
 }
 
-async function exportCsvByContest() {
-  const selectedContests = getSelectedContests();
-  if (!selectedContests.length) {
-    setStatus("Selecione ao menos um contest para exportar CSV.");
+// ============================================================================
+// CARREGAR DADOS DA API DO DOMJUDGE
+// ============================================================================
+async function loadReviewDataFromApi() {
+  const creds = window.getApiCredentials();
+  if (!creds || !creds.apiBase) {
+    showAuthGate(true);
     return;
   }
 
   try {
-    if (els.exportCsvBtn) els.exportCsvBtn.disabled = true;
-    setStatus("Gerando CSV(s) por contest...");
+    setReviewStatus("Carregando contests e submissões da API...", false);
+    els.reloadSubmissionsBtn.disabled = true;
 
-    if (selectedContests.length === 1) {
-      const contest = selectedContests[0];
-      const csv = buildContestCsv(contest);
-      const filename = `${contestFolderName(contest)}.csv`;
-      triggerBlobDownload(new Blob([csv], { type: "text/csv;charset=utf-8" }), filename);
-      setStatus("CSV exportado com sucesso.");
-      return;
+    const rawContests = await fetchApiJson("contests");
+    if (!Array.isArray(rawContests)) {
+      throw new Error("Resposta inválida da API de contests.");
     }
 
-    if (window.JSZip) {
-      const zip = new window.JSZip();
-      selectedContests.forEach((contest) => {
-        zip.file(`${contestFolderName(contest)}.csv`, buildContestCsv(contest));
-      });
-      const blob = await zip.generateAsync({ type: "blob" });
-      triggerBlobDownload(blob, "contests-csv.zip");
-      setStatus(`${selectedContests.length} CSV(s) exportados em ZIP.`);
-      return;
-    }
+    const contests = [];
 
-    selectedContests.forEach((contest) => {
-      const csv = buildContestCsv(contest);
-      triggerBlobDownload(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${contestFolderName(contest)}.csv`);
-    });
-    setStatus(`${selectedContests.length} CSV(s) exportados.`);
-  } catch (error) {
-    setStatus(`Erro ao exportar CSV: ${error.message}`);
-  } finally {
-    if (els.exportCsvBtn) {
-      els.exportCsvBtn.disabled = !state.contests.length;
-    }
-  }
-}
+    for (const meta of rawContests) {
+      const cId = meta.id || meta.cid;
+      try {
+        const [problems, teams, submissions, judgements] = await Promise.all([
+          fetchApiJson(`contests/${encodeURIComponent(cId)}/problems`).catch(() => []),
+          fetchApiJson(`contests/${encodeURIComponent(cId)}/teams`).catch(() => []),
+          fetchApiJson(`contests/${encodeURIComponent(cId)}/submissions`).catch(() => []),
+          fetchApiJson(`contests/${encodeURIComponent(cId)}/judgements`).catch(() => []),
+        ]);
 
-async function saveDatasetZip() {
-  if (state.dataSource !== "api") {
-    setStatus("Troque para fonte API para salvar dataset.");
-    return;
-  }
-  if (!state.contests.length) {
-    setStatus("Carregue os dados da API antes de salvar dataset.");
-    return;
-  }
-  if (!window.JSZip) {
-    setStatus("JSZip nao carregado no navegador.");
-    return;
-  }
-
-  try {
-    els.saveDatasetBtn.disabled = true;
-    setStatus("Gerando ZIP do dataset...");
-
-    const zip = new window.JSZip();
-    const root = zip.folder("dataset");
-    if (!root) throw new Error("falha ao criar estrutura do ZIP");
-
-    const manifest = {
-      generated_at: new Date().toISOString(),
-      source: "api",
-      contests: [],
-    };
-
-    state.contests.forEach((contest) => {
-      const folder = `contests/${contestFolderName(contest)}`;
-      const contestDir = root.folder(folder);
-      if (!contestDir) return;
-
-      contestDir.file("contest.json", JSON.stringify(contest.meta, null, 2));
-      contestDir.file("teams.json", JSON.stringify(contest.teams || [], null, 2));
-      contestDir.file("problems.json", JSON.stringify(contest.problems || [], null, 2));
-      contestDir.file("submissions.json", JSON.stringify(contest.submissions || [], null, 2));
-
-      const contestId = String(contest.meta.id || contest.meta.cid || "");
-      Object.entries(state.apiSourceCache).forEach(([key, files]) => {
-        const [cacheContestId, submissionId] = key.split("::");
-        if (cacheContestId !== contestId || !Array.isArray(files)) return;
-        files.forEach((file) => {
-          const filename = String(file.filename || "source.txt").replace(/[\\/]/g, "_");
-          contestDir.file(`sources/${submissionId}/${filename}`, file.source || "");
+        const judgementMap = new Map();
+        (judgements || []).forEach((j) => {
+          if (j.submission_id) judgementMap.set(String(j.submission_id), j);
         });
-      });
 
-      manifest.contests.push({
-        contest_id: contest.meta.id,
-        contest_cid: contest.meta.cid,
-        contest_shortname: contest.meta.shortname,
-        contest_name: contest.meta.name,
-        folder,
-        teams_count: (contest.teams || []).length,
-        problems_count: (contest.problems || []).length,
-        submissions_count: (contest.submissions || []).length,
-      });
-    });
+        const enrichedSubmissions = (submissions || []).map((s) => {
+          const j = judgementMap.get(String(s.id));
+          return {
+            ...s,
+            judgement_label: j?.judgement_type_id || s.judgement_label || "pending",
+            status: j?.judgement_type_id || s.status || "pending",
+            source_files: Array.isArray(s.files) ? s.files.map((f) => f.filename || f.name) : ["source.cpp"],
+          };
+        });
 
-    root.file("dataset_manifest.json", JSON.stringify(manifest, null, 2));
+        const contestObj = {
+          meta,
+          problems: problems || [],
+          teams: teams || [],
+          submissions: enrichedSubmissions,
+          submissionIndex: {},
+        };
 
-    const blob = await zip.generateAsync({ type: "blob" });
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    triggerBlobDownload(blob, `domjudge-dataset-${stamp}.zip`);
-    setStatus("Dataset salvo em ZIP com sucesso.");
-  } catch (error) {
-    setStatus(`Erro ao salvar dataset: ${error.message}`);
-  } finally {
-    els.saveDatasetBtn.disabled = !state.contests.length;
-  }
-}
-
-function populateSelect(selectEl, options, placeholder, { multiple = false } = {}) {
-  selectEl.innerHTML = "";
-  if (!multiple) {
-    const ph = document.createElement("option");
-    ph.value = "";
-    ph.textContent = placeholder;
-    selectEl.appendChild(ph);
-  }
-  options.forEach((opt) => {
-    const option = document.createElement("option");
-    option.value = String(opt.value);
-    option.textContent = opt.label;
-    selectEl.appendChild(option);
-  });
-}
-
-function reselectMulti(selectEl, values) {
-  values.forEach((value) => {
-    const option = selectEl.querySelector(`option[value="${CSS.escape(String(value))}"]`);
-    if (option) option.selected = true;
-  });
-}
-
-function populateProblemAndTeamSelectors() {
-  const selectedContests = getSelectedContests();
-  if (!selectedContests.length) return;
-
-  const problemOptions = [];
-  const teamOptions = [];
-  const teamSeen = new Set();
-
-  selectedContests.forEach((contest) => {
-    const contestId = contest.meta.id || contest.meta.cid;
-    contest.problems.forEach((problem) => {
-      problemOptions.push({
-        value: contestProblemKey(contestId, String(problem.id)),
-        label: `${getProblemLabel(problem)} (${contest.meta.shortname || contest.meta.name})`,
-      });
-    });
-
-    sortedTeams(contest).forEach((team) => {
-      const key = contestTeamKey(contestId, team.id);
-      if (teamSeen.has(key)) return;
-      teamSeen.add(key);
-      teamOptions.push({
-        value: key,
-        label: `${team.name || team.id} (${contest.meta.shortname || contest.meta.name})`,
-      });
-    });
-  });
-
-  populateSelect(els.problemSelect, [{ value: "all", label: "Todas as questoes" }, ...problemOptions], "Questoes", { multiple: true });
-  const availableProblems = new Set(["all", ...problemOptions.map((entry) => entry.value)]);
-  state.selectedProblemIds = state.selectedProblemIds.filter((value) => availableProblems.has(value));
-  if (!state.selectedProblemIds.length) state.selectedProblemIds = ["all"];
-  reselectMulti(els.problemSelect, state.selectedProblemIds);
-
-  populateSelect(els.filterProblemSelect, [{ value: "all", label: "Todas as questoes" }, ...problemOptions], "Filtro questao", { multiple: true });
-  const availableFilterProblems = new Set(["all", ...problemOptions.map((entry) => entry.value)]);
-  state.filterProblemIds = state.filterProblemIds.filter((value) => availableFilterProblems.has(value));
-  if (!state.filterProblemIds.length) state.filterProblemIds = ["all"];
-  reselectMulti(els.filterProblemSelect, state.filterProblemIds);
-
-  populateSelect(els.teamSelect, teamOptions, "Selecione um estudante");
-  if (!teamOptions.some((option) => option.value === state.selectedTeamKey)) {
-    state.selectedTeamKey = teamOptions[0]?.value || "";
-  }
-  els.teamSelect.value = state.selectedTeamKey;
-
-  const uniqueTeamsById = new Map();
-  teamOptions.forEach((option) => {
-    const teamId = option.value.split("::")[1];
-    if (!uniqueTeamsById.has(teamId)) {
-      uniqueTeamsById.set(teamId, option.label.replace(/ \(.+\)$/, ""));
-    }
-  });
-
-  populateSelect(
-    els.filterTeamSelect,
-    [{ value: "all", label: "Todos" }, ...Array.from(uniqueTeamsById.entries()).map(([value, label]) => ({ value, label }))],
-    "Filtro estudante"
-  );
-  if (!Array.from(els.filterTeamSelect.options).some((opt) => opt.value === state.filterTeamKey)) {
-    state.filterTeamKey = "all";
-  }
-  els.filterTeamSelect.value = state.filterTeamKey;
-}
-
-function populateStatusFilter() {
-  const statuses = new Map();
-  getSelectedContests().forEach((contest) => {
-    contest.submissions.forEach((submission) => {
-      const status = getSubmissionStatus(submission) || "pending";
-      statuses.set(status, submission.judgement_label || submission.status || status);
-    });
-  });
-
-  const statusOptions = [
-    { value: "all", label: "Todos" },
-    { value: "not_submitted", label: "Nao submetido" },
-    ...Array.from(statuses.entries()).map(([value, label]) => ({ value, label })),
-  ];
-  populateSelect(els.statusSelect, statusOptions, "Filtro status", { multiple: true });
-  const available = new Set(statusOptions.map((entry) => entry.value));
-  state.filterStatusIds = state.filterStatusIds.filter((value) => available.has(value));
-  if (!state.filterStatusIds.length) state.filterStatusIds = ["all"];
-  reselectMulti(els.statusSelect, state.filterStatusIds);
-}
-
-function chooseFinalJudgement(judgements) {
-  if (!Array.isArray(judgements) || !judgements.length) return null;
-
-  return judgements
-    .slice()
-    .sort((a, b) => {
-      const aKey = `${a.end_time || ""}|${a.start_time || ""}|${a.id || ""}`;
-      const bKey = `${b.end_time || ""}|${b.start_time || ""}|${b.id || ""}`;
-      return aKey.localeCompare(bKey);
-    })
-    .pop();
-}
-
-function buildStatusMap(judgementTypes) {
-  const map = new Map();
-  (judgementTypes || []).forEach((entry) => {
-    if (!entry || typeof entry !== "object") return;
-    map.set(String(entry.id), entry);
-  });
-  return map;
-}
-
-function enrichSubmissions(submissions, judgements, judgementTypes, withSourceMarker = false) {
-  const judgementTypeMap = buildStatusMap(judgementTypes);
-  const bySubmission = new Map();
-
-  (judgements || []).forEach((judgement) => {
-    if (!judgement || typeof judgement !== "object") return;
-    const key = String(judgement.submission_id ?? "");
-    if (!key) return;
-    if (!bySubmission.has(key)) bySubmission.set(key, []);
-    bySubmission.get(key).push(judgement);
-  });
-
-  return (submissions || []).map((submission) => {
-    const current = { ...submission };
-    const key = String(submission.id ?? "");
-    const submissionJudgements = bySubmission.get(key) || [];
-    const finalJudgement = chooseFinalJudgement(submissionJudgements);
-
-    let status = "pending";
-    let judgementTypeId = null;
-    let judgementLabel = null;
-
-    if (finalJudgement) {
-      judgementTypeId = finalJudgement.judgement_type_id || null;
-      const jt = judgementTypeMap.get(String(judgementTypeId || ""));
-      if (jt) {
-        status = String(jt.id || "pending");
-        judgementLabel = jt.name || jt.id || null;
-      } else if (judgementTypeId) {
-        status = String(judgementTypeId);
+        contestObj.submissionIndex = buildSubmissionIndex(contestObj);
+        contests.push(contestObj);
+      } catch (err) {
+        console.warn(`Erro ao carregar contest ${cId}:`, err);
       }
     }
 
-    current.status = status;
-    current.judgement_type_id = judgementTypeId;
-    current.judgement_label = judgementLabel;
-    current.judgements = submissionJudgements;
-    if (!Array.isArray(current.source_files)) {
-      current.source_files = withSourceMarker ? ["codigo"] : [];
-    }
-
-    return current;
-  });
-}
-
-async function loadContestDataFromDataset(contestItem) {
-  const folder = contestItem.folder;
-  const [meta, teams, problems, submissions] = await Promise.all([
-    readDatasetJson(`${folder}/contest.json`),
-    readDatasetJson(`${folder}/teams.json`),
-    readDatasetJson(`${folder}/problems.json`),
-    readDatasetJson(`${folder}/submissions.json`),
-  ]);
-
-  const contest = { meta, folder, teams, problems, submissions };
-  contest.submissionIndex = buildSubmissionIndex(contest);
-  return contest;
-}
-
-async function loadContestDataFromApi(contestMeta) {
-  const contestId = contestMeta.id ?? contestMeta.cid;
-  const [teams, problems, submissions, judgements, judgementTypes] = await Promise.all([
-    fetchApiJson(`contests/${encodeURIComponent(contestId)}/teams`),
-    fetchApiJson(`contests/${encodeURIComponent(contestId)}/problems`),
-    fetchApiJson(`contests/${encodeURIComponent(contestId)}/submissions`),
-    fetchApiJson(`contests/${encodeURIComponent(contestId)}/judgements`),
-    fetchApiJson(`contests/${encodeURIComponent(contestId)}/judgement-types`),
-  ]);
-
-  const contest = {
-    meta: contestMeta,
-    folder: null,
-    teams: Array.isArray(teams) ? teams : [],
-    problems: Array.isArray(problems) ? problems : [],
-    submissions: enrichSubmissions(submissions, judgements, judgementTypes, true),
-  };
-  contest.submissionIndex = buildSubmissionIndex(contest);
-  return contest;
-}
-
-async function finalizeLoadedContests(successLabel) {
-  if (!state.contests.length) {
-    setStatus("Nenhum contest encontrado para a fonte selecionada.");
-    return;
-  }
-
-  const contestOptions = state.contests
-    .slice()
-    .sort((a, b) => formatContestLabel(a).localeCompare(formatContestLabel(b), "pt-BR"))
-    .map((contest) => ({ value: String(contest.meta.id || contest.meta.cid), label: formatContestLabel(contest) }));
-
-  populateSelect(els.contestSelect, contestOptions, "Selecione contest", { multiple: true });
-  const selectedSet = new Set(state.selectedContestIds.map((value) => String(value)));
-  state.selectedContestIds = contestOptions.filter((entry) => selectedSet.has(String(entry.value))).map((entry) => String(entry.value));
-  if (!state.selectedContestIds.length) {
-    state.selectedContestIds = contestOptions.slice(0, 1).map((entry) => String(entry.value));
-  }
-
-  reselectMulti(els.contestSelect, state.selectedContestIds);
-  populateProblemAndTeamSelectors();
-  populateStatusFilter();
-  setStatus(`${successLabel}: ${state.contests.length} contest(s).`);
-  renderView();
-}
-
-async function loadDataset() {
-  state.datasetBase = els.datasetBase.value.trim();
-  state.stepIndex = 0;
-  state.apiSourceCache = {};
-  setStatus("Carregando dataset...");
-  els.results.innerHTML = "";
-
-  if (!state.datasetFileMap && !state.datasetBase) {
-    state.contests = [];
-    setStatus("Selecione uma pasta de dataset e depois clique em Carregar dataset.");
-    return;
-  }
-
-  state.manifest = await readDatasetJson("dataset_manifest.json");
-  state.contests = await Promise.all(state.manifest.contests.map(loadContestDataFromDataset));
-  state.loadedSource = "dataset";
-  await finalizeLoadedContests("Dataset carregado");
-  updateSourceControlsVisibility();
-}
-
-async function loadApi() {
-  state.apiBase = els.apiBase.value.trim() || state.apiBase;
-  state.apiUser = els.apiUser.value.trim();
-  state.apiPassword = els.apiPassword.value;
-  state.stepIndex = 0;
-  state.apiSourceCache = {};
-  setStatus("Carregando dados da API...");
-  els.results.innerHTML = "";
-
-  const contests = await fetchApiJson("contests");
-  if (!Array.isArray(contests) || !contests.length) {
-    throw new Error("nenhum contest encontrado na API para esse usuario");
-  }
-
-  state.contests = await Promise.all(contests.map(loadContestDataFromApi));
-  state.loadedSource = "api";
-  await finalizeLoadedContests("API carregada");
-  updateSourceControlsVisibility();
-}
-
-async function loadData() {
-  try {
-    if (state.dataSource === "api") {
-      await loadApi();
-    } else {
-      await loadDataset();
-    }
-  } catch (error) {
-    setStatus(`Erro ao carregar: ${error.message}`);
-  }
-}
-
-els.dataSourceRadios.forEach((radio) => {
-  radio.addEventListener("change", () => {
-    if (!radio.checked) return;
-    state.dataSource = radio.value;
-    state.stepIndex = 0;
-    updateSourceControlsVisibility();
-  });
-});
-
-els.viewButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    els.viewButtons.forEach((btn) => btn.classList.remove("active"));
-    button.classList.add("active");
-    state.view = button.dataset.view;
-    state.stepIndex = 0;
-    updateControlsVisibility();
+    globalState.contests = contests;
+    updateDropdowns();
     renderView();
-  });
-});
+    updateControlsVisibility();
 
-els.reloadBtn.addEventListener("click", loadData);
+    if (els.exportCsvBtn) els.exportCsvBtn.disabled = contests.length === 0;
+    if (els.saveDatasetBtn) els.saveDatasetBtn.disabled = contests.length === 0;
 
-if (els.pickDatasetFolderBtn && els.datasetFolderInput) {
-  els.pickDatasetFolderBtn.addEventListener("click", () => {
-    els.datasetFolderInput.click();
-  });
-
-  els.datasetFolderInput.addEventListener("change", () => {
-    const { fileMap, prefix, rootLabel } = buildDatasetFileSelection(els.datasetFolderInput.files);
-    state.datasetFileMap = fileMap.size ? fileMap : null;
-    state.datasetRootPrefix = prefix;
-
-    if (els.datasetBase) {
-      els.datasetBase.value = rootLabel || "";
-    }
-    setStatus(state.datasetFileMap ? "Pasta selecionada. Clique em Carregar dataset." : "Nenhuma pasta selecionada.");
-  });
-}
-
-if (els.saveDatasetBtn) {
-  els.saveDatasetBtn.addEventListener("click", saveDatasetZip);
-}
-
-if (els.exportCsvBtn) {
-  els.exportCsvBtn.addEventListener("click", exportCsvByContest);
-}
-
-els.contestSelect.addEventListener("change", (event) => {
-  state.selectedContestIds = getSelectedValues(event.target);
-  if (!state.selectedContestIds.length) {
-    state.selectedContestIds = Array.from(event.target.options).slice(0, 1).map((entry) => entry.value);
-    reselectMulti(els.contestSelect, state.selectedContestIds);
+    showToast(`${contests.length} contest(s) sincronizados com sucesso!`, "success");
+    setReviewStatus(`${contests.length} contest(s) carregados da API.`);
+  } catch (err) {
+    showToast(`Erro ao carregar da API: ${err.message}`, "error");
+    setReviewStatus(`Erro ao carregar: ${err.message}`, true);
+  } finally {
+    els.reloadSubmissionsBtn.disabled = false;
   }
-  state.stepIndex = 0;
-  populateProblemAndTeamSelectors();
-  populateStatusFilter();
-  renderView();
-});
+}
 
-els.problemSelect.addEventListener("change", (event) => {
-  state.selectedProblemIds = getSelectedValues(event.target);
-  if (!state.selectedProblemIds.length) state.selectedProblemIds = ["all"];
-  state.stepIndex = 0;
-  renderView();
-});
+// ============================================================================
+// EXPORTAÇÕES (CSV & DATASET ZIP)
+// ============================================================================
+function exportCsv() {
+  const rows = collectRows();
+  if (!rows.length) {
+    showToast("Nenhum dado para exportar com os filtros atuais.", "warning");
+    return;
+  }
 
-els.teamSelect.addEventListener("change", (event) => {
-  state.selectedTeamKey = event.target.value;
-  renderView();
-});
+  let csv = "contest,problem,team,verdict,submission_id,time\n";
+  rows.forEach((r) => {
+    const final = finalSubmission(r.submissions);
+    csv += `"${r.contest.meta.shortname || r.contest.meta.id}","${r.problem.shortname || r.problem.name}","${r.team.name || r.team.id}","${final?.judgement_label || "nao_submetido"}","${final?.id || ""}","${final?.time || ""}"\n`;
+  });
 
-els.filterProblemSelect.addEventListener("change", (event) => {
-  state.filterProblemIds = getSelectedValues(event.target);
-  if (!state.filterProblemIds.length) state.filterProblemIds = ["all"];
-  state.stepIndex = 0;
-  renderView();
-});
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `domjudge_review_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast("CSV de review exportado com sucesso!", "success");
+}
 
-els.filterTeamSelect.addEventListener("change", (event) => {
-  state.filterTeamKey = event.target.value || "all";
-  state.stepIndex = 0;
-  renderView();
-});
+// ============================================================================
+// INICIALIZAÇÃO GERAL DA APLICAÇÃO
+// ============================================================================
+function setupEventListeners() {
+  // Roteamento de Abas
+  document.querySelectorAll(".app-tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tabId = btn.getAttribute("data-tab");
+      switchTab(tabId);
+    });
+  });
 
-els.statusSelect.addEventListener("change", (event) => {
-  state.filterStatusIds = getSelectedValues(event.target);
-  if (!state.filterStatusIds.length) state.filterStatusIds = ["all"];
-  state.stepIndex = 0;
-  renderView();
-});
+  window.addEventListener("hashchange", handleHashChange);
 
-updateControlsVisibility();
-updateSourceControlsVisibility();
-setStatus("Selecione uma fonte de dados e clique em carregar.");
+  // Sub-navegação do Review
+  els.viewButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      els.viewButtons.forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      globalState.view = btn.dataset.view;
+      updateControlsVisibility();
+      renderView();
+    });
+  });
+
+  // Filtros de Review
+  if (els.contestSelect) {
+    els.contestSelect.addEventListener("change", () => {
+      globalState.selectedContestIds = getSelectedValues(els.contestSelect);
+      renderView();
+    });
+  }
+  if (els.problemSelect) {
+    els.problemSelect.addEventListener("change", () => {
+      globalState.selectedProblemIds = getSelectedValues(els.problemSelect);
+      renderView();
+    });
+  }
+  if (els.teamSelect) {
+    els.teamSelect.addEventListener("change", () => {
+      globalState.selectedTeamKey = els.teamSelect.value;
+      renderView();
+    });
+  }
+  if (els.statusSelect) {
+    els.statusSelect.addEventListener("change", () => {
+      globalState.filterStatusIds = getSelectedValues(els.statusSelect);
+      renderView();
+    });
+  }
+  if (els.filterProblemSelect) {
+    els.filterProblemSelect.addEventListener("change", () => {
+      globalState.filterProblemIds = getSelectedValues(els.filterProblemSelect);
+      renderView();
+    });
+  }
+  if (els.filterTeamSelect) {
+    els.filterTeamSelect.addEventListener("change", () => {
+      globalState.filterTeamKey = els.filterTeamSelect.value;
+      renderView();
+    });
+  }
+
+  if (els.reloadSubmissionsBtn) els.reloadSubmissionsBtn.addEventListener("click", loadReviewDataFromApi);
+  if (els.exportCsvBtn) els.exportCsvBtn.addEventListener("click", exportCsv);
+
+  // Atalhos de teclado no modo "Aluno por vez"
+  window.addEventListener("keydown", (e) => {
+    if (globalState.activeTab === "review" && globalState.view === "step") {
+      if (e.key === "ArrowLeft") {
+        globalState.stepIndex = Math.max(0, globalState.stepIndex - 1);
+        renderStepView();
+      } else if (e.key === "ArrowRight") {
+        const rows = collectRows();
+        globalState.stepIndex = Math.min(rows.length - 1, globalState.stepIndex + 1);
+        renderStepView();
+      }
+    }
+  });
+
+  // Botão Trocar Conexão
+  const openChangeAuthBtn = document.getElementById("openChangeAuthBtn");
+  if (openChangeAuthBtn) {
+    openChangeAuthBtn.addEventListener("click", () => {
+      showAuthGate(true);
+    });
+  }
+
+  // Formulário de Autenticação / Conexão API
+  const authForm = document.getElementById("authForm");
+  const authSubmitBtn = document.getElementById("authSubmitBtn");
+  const authStatusFeedback = document.getElementById("authStatusFeedback");
+  const authDemoBtn = document.getElementById("authDemoBtn");
+
+  if (authForm) {
+    authForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const apiBase = document.getElementById("authApiBase").value.trim();
+      const user = document.getElementById("authApiUser").value.trim();
+      const password = document.getElementById("authApiPassword").value;
+      const remember = document.getElementById("authRememberCheckbox").checked;
+
+      if (!apiBase || !user || !password) {
+        if (authStatusFeedback) authStatusFeedback.textContent = "Preencha todos os campos obrigatórios.";
+        return;
+      }
+
+      authSubmitBtn.disabled = true;
+      authSubmitBtn.innerHTML = "<span>Validando conexão...</span>";
+      if (authStatusFeedback) authStatusFeedback.textContent = "";
+
+      try {
+        await validateApiCredentials(apiBase, user, password);
+
+        globalState.apiBase = apiBase;
+        globalState.apiUser = user;
+        globalState.apiPassword = password;
+        globalState.isAuthenticated = true;
+
+        saveStoredSession(apiBase, user, password, remember);
+        updateSessionBar();
+        showAuthGate(false);
+        showToast(`Conectado com sucesso ao DOMjudge (${user})!`, "success");
+
+        // Disparar carregamento na aba atual
+        switchTab(globalState.activeTab, false);
+      } catch (err) {
+        if (authStatusFeedback) authStatusFeedback.textContent = err.message;
+        showToast(err.message, "error");
+      } finally {
+        authSubmitBtn.disabled = false;
+        authSubmitBtn.innerHTML = "<span>Conectar ao DOMjudge</span>";
+      }
+    });
+  }
+
+  if (authDemoBtn) {
+    authDemoBtn.addEventListener("click", () => {
+      globalState.apiBase = "https://coderunner.cin.ufpe.br/api/v4";
+      globalState.apiUser = "demo_user";
+      globalState.apiPassword = "demo_password";
+      globalState.isAuthenticated = true;
+      updateSessionBar();
+      showAuthGate(false);
+      showToast("Modo Demonstração ativado.", "info");
+
+      if (window.UsersModule) {
+        window.UsersModule.loadDemoUsers();
+      }
+    });
+  }
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  setupEventListeners();
+
+  const apiBaseInput = document.getElementById("authApiBase");
+  const apiUserInput = document.getElementById("authApiUser");
+  const apiPasswordInput = document.getElementById("authApiPassword");
+
+  if (apiBaseInput && envConfig.DOMJUDGE_API_BASE) {
+    apiBaseInput.value = envConfig.DOMJUDGE_API_BASE;
+  }
+  if (apiUserInput && envConfig.DOMJUDGE_API_USER) {
+    apiUserInput.value = envConfig.DOMJUDGE_API_USER;
+  }
+  if (apiPasswordInput && envConfig.DOMJUDGE_API_PASSWORD) {
+    apiPasswordInput.value = envConfig.DOMJUDGE_API_PASSWORD;
+  }
+
+  // 1. Verificar se há sessão salva válida no storage
+  const session = loadStoredSession();
+  if (session && session.apiBase && session.user && session.password) {
+    globalState.apiBase = session.apiBase;
+    globalState.apiUser = session.user;
+    globalState.apiPassword = session.password;
+    globalState.isAuthenticated = true;
+
+    if (apiBaseInput) apiBaseInput.value = session.apiBase;
+    if (apiUserInput) apiUserInput.value = session.user;
+
+    updateSessionBar();
+    showAuthGate(false);
+    handleHashChange();
+    return;
+  }
+
+  // 2. Se variáveis de ambiente fornecerem credenciais completas, auto-conectar (ideal para localhost / docker)
+  if (envConfig.DOMJUDGE_API_BASE && envConfig.DOMJUDGE_API_USER && envConfig.DOMJUDGE_API_PASSWORD) {
+    try {
+      globalState.apiBase = envConfig.DOMJUDGE_API_BASE;
+      globalState.apiUser = envConfig.DOMJUDGE_API_USER;
+      globalState.apiPassword = envConfig.DOMJUDGE_API_PASSWORD;
+      globalState.isAuthenticated = true;
+
+      saveStoredSession(envConfig.DOMJUDGE_API_BASE, envConfig.DOMJUDGE_API_USER, envConfig.DOMJUDGE_API_PASSWORD, true);
+      updateSessionBar();
+      showAuthGate(false);
+      showToast(`Conectado automaticamente via variáveis de ambiente (${envConfig.DOMJUDGE_API_USER})`, "success");
+      handleHashChange();
+      return;
+    } catch (e) {
+      console.warn("Falha no auto-login por variáveis de ambiente:", e);
+    }
+  }
+
+  // Caso contrário, exibir o gate de autenticação
+  showAuthGate(true);
+  updateSessionBar();
+});

@@ -1,0 +1,20 @@
+services:
+  domjudge-wizard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PORT: 7070
+    container_name: domjudge_wizard
+    restart: unless-stopped
+    ports:
+      - "${PORT:-7070}:7070"
+    environment:
+      - PORT=7070
+      - DOMJUDGE_API_BASE=${DOMJUDGE_API_BASE:-https://coderunner.cin.ufpe.br/api/v4}
+      - DOMJUDGE_API_USER=${DOMJUDGE_API_USER:-}
+      - DOMJUDGE_API_PASSWORD=${DOMJUDGE_API_PASSWORD:-}
+      - STORAGE_EXPIRATION_DAYS=${STORAGE_EXPIRATION_DAYS:-7}
+    env_file:
+      - path: .env
+        required: false

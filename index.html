@@ -3,120 +3,884 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>DOMjudge Review</title>
+    <title>DOMjudge Wizard - Suite Completa</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link
       rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
     />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="bg-grid"></div>
-    <main class="shell">
-      <header class="hero">
-        <div>
-          <div class="screen-links">
-            <a href="index.html" class="screen-link active">Visualizacao</a>
-            <a href="creator.html" class="screen-link">Criacao</a>
-            <a href="contest-manager.html" class="screen-link">Gerenciar contest</a>
-            <a href="users.html" class="screen-link">Gerenciar usuarios</a>
+
+    <!-- =====================================================================
+         GATE DE AUTENTICAÇÃO / LOGIN NA API
+         ===================================================================== -->
+    <div id="authGate" class="auth-overlay">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <div class="auth-logo-icon">⚡</div>
+          <div>
+            <h1 class="auth-title">DOMjudge Wizard</h1>
+            <p class="auth-subtitle">Conecte-se à API do DOMjudge para liberar todos os módulos da suíte.</p>
           </div>
-          <p class="eyebrow">DOMjudge review</p>
-          <h1>Leitura rapida de respostas e codigos</h1>
-          <p class="subtitle">
-            Navegue por questao, estudante ou contest. Sempre mostre a resposta correta
-            primeiro e compare com as demais submetidas.
-          </p>
         </div>
-        <div class="dataset-card">
-          <p class="card-title">Fonte de dados</p>
-          <div class="source-switch" role="group" aria-label="Fonte dos dados">
-            <label class="source-option">
-              <input type="radio" name="dataSource" value="dataset" checked />
-              <span>Dataset local</span>
+
+        <form id="authForm" class="auth-form">
+          <div class="form-group">
+            <label for="authApiBase">API Base URL</label>
+            <input
+              id="authApiBase"
+              type="text"
+              required
+              placeholder="https://coderunner.cin.ufpe.br/api/v4"
+              value="https://coderunner.cin.ufpe.br/api/v4"
+            />
+            <span class="form-hint">Ex.: https://seu-domjudge.com/api/v4</span>
+          </div>
+
+          <div class="form-group">
+            <label for="authApiUser">Usuário da API</label>
+            <input id="authApiUser" type="text" required placeholder="admin ou jury" autocomplete="username" />
+          </div>
+
+          <div class="form-group">
+            <label for="authApiPassword">Senha da API</label>
+            <input id="authApiPassword" type="password" required placeholder="••••••••••••" autocomplete="current-password" />
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input id="authRememberCheckbox" type="checkbox" checked />
+              <span>Lembrar dados de acesso neste navegador (salvo por 7 dias)</span>
             </label>
-            <label class="source-option">
-              <input type="radio" name="dataSource" value="api" />
-              <span>API DOMjudge</span>
-            </label>
           </div>
 
-          <div id="datasetFields" class="source-fields">
-            <label for="datasetBase">Pasta do dataset</label>
-            <div class="row">
-              <input id="datasetBase" type="text" value="" placeholder="Nenhuma pasta selecionada" readonly />
-              <button id="pickDatasetFolderBtn" class="badge dim" type="button">Selecionar pasta</button>
-            </div>
-            <input id="datasetFolderInput" type="file" webkitdirectory directory multiple hidden />
+          <div style="display: flex; gap: 10px; margin-top: 8px;">
+            <button id="authSubmitBtn" type="submit" class="primary" style="flex: 1;">
+              <span>Conectar ao DOMjudge</span>
+            </button>
+            <button id="authDemoBtn" type="button" class="dim" title="Carregar modo de demonstração local para testes">
+              Demo
+            </button>
           </div>
 
-          <div id="apiFields" class="source-fields" hidden>
-            <label for="apiBase">API base</label>
-            <input id="apiBase" type="text" value="https://coderunner.cin.ufpe.br/api/v4" />
-            <label for="apiUser">Usuario API</label>
-            <input id="apiUser" type="text" />
-            <label for="apiPassword">Senha API</label>
-            <input id="apiPassword" type="password" />
-          </div>
+          <div id="authStatusFeedback" class="form-hint" style="color: var(--danger); min-height: 1.2em;"></div>
+        </form>
+      </div>
+    </div>
 
-          <div class="row">
-            <button id="reloadBtn" class="primary">Carregar</button>
-            <button id="exportCsvBtn" class="badge dim" type="button" disabled>Exportar CSV por contest</button>
+    <!-- =====================================================================
+         SHELL PRINCIPAL DA SINGLE PAGE APPLICATION (SPA)
+         ===================================================================== -->
+    <main class="shell">
+      <!-- Navbar Global Sticky -->
+      <header class="app-header">
+        <a href="#review" class="app-brand">
+          <div class="app-brand-icon">⚡</div>
+          <div class="app-brand-text">
+            <span class="app-brand-title">DOMjudge Wizard</span>
+            <span class="app-brand-tag">Competitive Suite</span>
           </div>
-          <div id="apiActions" class="row" hidden>
-            <button id="saveDatasetBtn" class="badge dim" type="button" disabled>Salvar dataset (.zip)</button>
+        </a>
+
+        <!-- Navegação por Abas da SPA -->
+        <nav class="app-tabs" role="tablist" aria-label="Módulos do Sistema">
+          <button id="tabReview" class="app-tab-btn active" data-tab="review" role="tab" aria-selected="true">
+            <span class="app-tab-icon">📊</span>
+            <span>Visualização & Review</span>
+          </button>
+          <button id="tabCreator" class="app-tab-btn" data-tab="creator" role="tab" aria-selected="false">
+            <span class="app-tab-icon">✍️</span>
+            <span>Criador de Questões</span>
+          </button>
+          <button id="tabContests" class="app-tab-btn" data-tab="contests" role="tab" aria-selected="false">
+            <span class="app-tab-icon">🏆</span>
+            <span>Gerenciar Contests</span>
+          </button>
+          <button id="tabUsers" class="app-tab-btn" data-tab="users" role="tab" aria-selected="false">
+            <span class="app-tab-icon">👥</span>
+            <span>Gerenciar Usuários</span>
+          </button>
+        </nav>
+
+        <!-- Status da Sessão & Botão de Troca de Conexão -->
+        <div class="app-session-bar">
+          <div class="api-status-pill">
+            <span id="sessionDot" class="status-dot"></span>
+            <span id="sessionUserLabel">Conectado</span>
           </div>
-          <p id="dataHint" class="hint">Use um servidor local para permitir fetch dos arquivos JSON.</p>
+          <button id="openChangeAuthBtn" type="button" class="btn-change-auth dim">
+            ⚙️ Trocar Conexão
+          </button>
         </div>
       </header>
 
-      <section class="view-select">
-        <button data-view="question" class="view-btn active">Por questao</button>
-        <button data-view="student" class="view-btn">Por estudante</button>
-        <button data-view="contest" class="view-btn">Por contest</button>
-        <button data-view="step" class="view-btn">Aluno por vez</button>
-        <button data-view="summary" class="view-btn">Resumo</button>
+      <!-- ===================================================================
+           MÓDULO 1: VISUALIZAÇÃO E REVIEW (#review)
+           =================================================================== -->
+      <section id="view-review" class="spa-view active">
+        <div class="view-hero">
+          <div>
+            <h2 class="view-hero-title">Leitura rápida de respostas e códigos</h2>
+            <p class="view-hero-subtitle">
+              Navegue por questão, estudante ou contest. Compare a solução correta (AC) com as demais submissões.
+            </p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button id="reloadSubmissionsBtn" class="primary" type="button">🔄 Atualizar Dados</button>
+            <button id="exportCsvBtn" class="dim" type="button" disabled>📥 Exportar CSV</button>
+            <button id="saveDatasetBtn" class="dim" type="button" disabled>📦 Salvar Dataset (.zip)</button>
+          </div>
+        </div>
+
+        <!-- Sub-navegação de Visualizações -->
+        <div class="review-subnav" role="tablist">
+          <button data-view="question" class="review-subnav-btn active">Por Questão</button>
+          <button data-view="student" class="review-subnav-btn">Por Estudante</button>
+          <button data-view="contest" class="review-subnav-btn">Por Contest</button>
+          <button data-view="step" class="review-subnav-btn">Aluno por Vez</button>
+          <button data-view="summary" class="review-subnav-btn">Resumo Geral</button>
+        </div>
+
+        <!-- Filtros Dinâmicos -->
+        <div class="controls-grid">
+          <div class="control-item" data-control="contest">
+            <label for="contestSelect">Contest</label>
+            <select id="contestSelect" class="multi" multiple size="5"></select>
+          </div>
+          <div class="control-item" data-control="problem">
+            <label for="problemSelect">Questão</label>
+            <select id="problemSelect" class="multi" multiple size="5"></select>
+          </div>
+          <div class="control-item" data-control="team">
+            <label for="teamSelect">Estudante (Team)</label>
+            <select id="teamSelect"></select>
+          </div>
+          <div class="control-item" data-control="status">
+            <label for="statusSelect">Filtrar por Status</label>
+            <select id="statusSelect" class="multi" multiple size="5"></select>
+          </div>
+          <div class="control-item" data-control="filterProblem">
+            <label for="filterProblemSelect">Filtrar por Questão</label>
+            <select id="filterProblemSelect" class="multi" multiple size="5"></select>
+          </div>
+          <div class="control-item" data-control="filterTeam">
+            <label for="filterTeamSelect">Filtrar por Estudante</label>
+            <select id="filterTeamSelect"></select>
+          </div>
+        </div>
+
+        <div id="reviewStatusMessage" class="form-hint" style="margin-bottom: 16px; font-size: 0.9rem;"></div>
+        <div id="results" class="results-grid"></div>
       </section>
 
-      <section class="controls">
-        <div class="control" data-control="contest">
-          <label for="contestSelect">Contest</label>
-          <select id="contestSelect" class="multi" multiple size="6"></select>
+      <!-- ===================================================================
+           MÓDULO 2: CRIADOR DE QUESTÕES COM MARKDOWN STUDIO (#creator)
+           =================================================================== -->
+      <section id="view-creator" class="spa-view">
+        <div class="view-hero">
+          <div>
+            <h2 class="view-hero-title">Criador de Questões DOMjudge</h2>
+            <p class="view-hero-subtitle">
+              Escreva enunciados com Markdown Studio e KaTeX, gerencie casos de teste, baixe pacotes ZIP e envie diretamente via API.
+            </p>
+          </div>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <input id="importZipInput" type="file" accept=".zip" hidden />
+            <button id="importZipBtn" type="button" class="dim">📂 Importar ZIP Existente</button>
+            <button id="downloadPdfBtn" type="button" class="dim">📄 Baixar PDF</button>
+            <button id="downloadZipBtn" type="button" class="primary">📦 Baixar Pacote ZIP</button>
+            <button id="sendToDomjudgeBtn" type="button" class="success">🚀 Enviar para DOMjudge</button>
+          </div>
         </div>
-        <div class="control" data-control="problem">
-          <label for="problemSelect">Questao</label>
-          <select id="problemSelect" class="multi" multiple size="6"></select>
+
+        <div class="card" style="margin-bottom: 24px;">
+          <h3 class="card-title" style="margin-bottom: 14px;">Metadados do Problema</h3>
+          <div class="creator-form-grid">
+            <div class="form-group">
+              <label for="creatorName">Nome da Questão *</label>
+              <input id="creatorName" type="text" placeholder="Ex.: Soma de Vetores" />
+            </div>
+            <div class="form-group">
+              <label for="creatorShortname">Shortname (opcional)</label>
+              <input id="creatorShortname" type="text" placeholder="Ex.: soma-vetores" />
+            </div>
+            <div class="form-group">
+              <label for="creatorTime">Tempo Limite (segundos)</label>
+              <input id="creatorTime" type="number" min="0.1" step="0.5" value="1" />
+            </div>
+            <div class="form-group">
+              <label for="creatorMemory">Memória Limite (MB)</label>
+              <input id="creatorMemory" type="number" min="16" step="64" value="512" />
+            </div>
+            <div class="form-group">
+              <label for="creatorProblemId">ID do Problema na API (para atualizar)</label>
+              <input id="creatorProblemId" type="text" placeholder="ex.: soma-vetores (opcional)" />
+            </div>
+          </div>
         </div>
-        <div class="control" data-control="team">
-          <label for="teamSelect">Estudante (team)</label>
-          <select id="teamSelect"></select>
+
+        <!-- Markdown Studio Integrado -->
+        <div class="card md-studio-card" style="margin-bottom: 24px;">
+          <div class="md-toolbar">
+            <div class="md-toolbar-group">
+              <button type="button" class="md-toolbar-btn" data-action="h1" title="Título 1">H1</button>
+              <button type="button" class="md-toolbar-btn" data-action="h2" title="Título 2">H2</button>
+              <button type="button" class="md-toolbar-btn" data-action="h3" title="Título 3">H3</button>
+              <span style="color: var(--border-strong);">|</span>
+              <button type="button" class="md-toolbar-btn" data-action="bold" title="Negrito (Ctrl+B)"><b>B</b></button>
+              <button type="button" class="md-toolbar-btn" data-action="italic" title="Itálico (Ctrl+I)"><i>I</i></button>
+              <button type="button" class="md-toolbar-btn" data-action="code" title="Código inline">`code`</button>
+              <button type="button" class="md-toolbar-btn" data-action="codeblock" title="Bloco de código">```code```</button>
+              <span style="color: var(--border-strong);">|</span>
+              <button type="button" class="md-toolbar-btn" data-action="math-inline" title="Fórmula KaTeX inline">$x$</button>
+              <button type="button" class="md-toolbar-btn" data-action="math-block" title="Equação KaTeX centralizada">$$ \sum $$</button>
+              <button type="button" class="md-toolbar-btn" data-action="table" title="Inserir Tabela">📊 Tabela</button>
+              <button type="button" class="md-toolbar-btn" data-action="template-icpc" title="Carregar Estrutura Padrão ICPC/OBI">📋 Template ICPC</button>
+              <button type="button" class="md-toolbar-btn" id="insertSampleTableBtn" title="Gerar tabela Markdown com base nos Casos de Teste (Samples)">⚡ Inserir Tabela de Exemplos</button>
+            </div>
+
+            <div class="md-view-switch">
+              <button type="button" class="md-view-btn active" data-view-mode="split">Split</button>
+              <button type="button" class="md-view-btn" data-view-mode="editor">Apenas Editor</button>
+              <button type="button" class="md-view-btn" data-view-mode="preview">Apenas Preview</button>
+            </div>
+          </div>
+
+          <div id="mdWorkspace" class="md-workspace mode-split">
+            <div class="md-editor-pane">
+              <textarea
+                id="creatorMarkdown"
+                class="md-textarea"
+                placeholder="# Título do Problema&#10;&#10;Escreva a descrição do problema aqui com equações matemáticas $O(N)$ e código...&#10;&#10;## Entrada&#10;A primeira linha contém um inteiro $N$...&#10;&#10;## Saída&#10;Imprima a resposta requerida."
+              ></textarea>
+            </div>
+            <div class="md-preview-pane">
+              <div id="markdownPreview" class="rendered-markdown"></div>
+            </div>
+          </div>
         </div>
-        <div class="control" data-control="status">
-          <label for="statusSelect">Filtrar por status</label>
-          <select id="statusSelect" class="multi" multiple size="6"></select>
+
+        <!-- Casos de Teste -->
+        <div class="card tests-section">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Casos de Teste (Sample & Secret)</h3>
+              <p class="form-hint">Adicione entradas e saídas esperadas. Os testes 'Sample' são exibidos no PDF/enunciado.</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button id="addSampleTest" type="button" class="dim">+ Adicionar Sample (Exemplo)</button>
+              <button id="addSecretTest" type="button" class="dim">+ Adicionar Secret (Oculto)</button>
+            </div>
+          </div>
+
+          <div id="testsContainer" class="tests-container"></div>
         </div>
-        <div class="control" data-control="filterProblem">
-          <label for="filterProblemSelect">Filtrar por questao</label>
-          <select id="filterProblemSelect" class="multi" multiple size="6"></select>
+
+        <div style="margin-top: 16px;">
+          <label class="checkbox-label">
+            <input id="includePdfCheckbox" type="checkbox" checked />
+            <span>Anexar PDF compilado no pacote ZIP (problem.pdf)</span>
+          </label>
         </div>
-        <div class="control" data-control="filterTeam">
-          <label for="filterTeamSelect">Filtrar por estudante</label>
-          <select id="filterTeamSelect"></select>
+
+        <div id="creatorFeedback" class="form-hint" style="margin-top: 12px; font-size: 0.9rem;"></div>
+      </section>
+
+      <!-- ===================================================================
+           MÓDULO 3: GERENCIADOR DE CONTESTS (#contests)
+           =================================================================== -->
+      <section id="view-contests" class="spa-view">
+        <div class="view-hero">
+          <div>
+            <h2 class="view-hero-title">Gerenciamento de Contests</h2>
+            <p class="view-hero-subtitle">
+              Visualize, filtre e altere em lote os horários de início/fim e o status habilitado dos contests no DOMjudge.
+            </p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button id="managerLoadBtn" class="primary" type="button">🔄 Atualizar Contests</button>
+            <button id="managerSaveChangedBtn" class="success" type="button" disabled>💾 Salvar Alterações Pendentes</button>
+          </div>
+        </div>
+
+        <!-- KPI Grid Contests -->
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-icon">🏆</div>
+            <div class="kpi-info">
+              <span class="kpi-label">Total de Contests</span>
+              <span id="kpiContestTotal" class="kpi-value">0</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="color: var(--success);">🟢</div>
+            <div class="kpi-info">
+              <span class="kpi-label">Contests Ativos / Habilitados</span>
+              <span id="kpiContestActive" class="kpi-value">0</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="color: var(--warning);">⏳</div>
+            <div class="kpi-info">
+              <span class="kpi-label">Contests Agendados</span>
+              <span id="kpiContestUpcoming" class="kpi-value">0</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="color: var(--brand);">✏️</div>
+            <div class="kpi-info">
+              <span class="kpi-label">Alterações Pendentes</span>
+              <span id="kpiContestChanged" class="kpi-value">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Toolbar de Filtros e Aplicação em Massa -->
+        <div class="card table-toolbar">
+          <div class="filters-row">
+            <div class="form-group">
+              <label for="managerFilterText">Buscar por Nome / ID</label>
+              <input id="managerFilterText" type="text" placeholder="Digite para filtrar..." />
+            </div>
+            <div class="form-group">
+              <label for="managerFilterEnabled">Status</label>
+              <select id="managerFilterEnabled">
+                <option value="all">Todos</option>
+                <option value="enabled">Apenas Habilitados</option>
+                <option value="disabled">Apenas Desabilitados</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="managerFilterChanged">Alteração</label>
+              <select id="managerFilterChanged">
+                <option value="all">Todos</option>
+                <option value="changed">Apenas Alterados</option>
+                <option value="unchanged">Apenas Não Alterados</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="managerExtraContestIds">IDs Extras (opcional)</label>
+              <input id="managerExtraContestIds" type="text" placeholder="Ex.: 12,14,15,16" />
+            </div>
+          </div>
+
+          <!-- Barra de Ações em Lote -->
+          <div class="bulk-actions-bar">
+            <div class="bulk-inputs">
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.72rem;">Aplicar Início</label>
+                <input id="managerBulkStart" type="datetime-local" style="padding: 6px 10px;" />
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.72rem;">Aplicar Fim</label>
+                <input id="managerBulkEnd" type="datetime-local" style="padding: 6px 10px;" />
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.72rem;">Status</label>
+                <select id="managerBulkEnabled" style="padding: 6px 10px;">
+                  <option value="keep" selected>Manter atual</option>
+                  <option value="enable">Habilitar</option>
+                  <option value="disable">Desabilitar</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.72rem;">Escopo</label>
+                <select id="managerBulkScope" style="padding: 6px 10px;">
+                  <option value="page" selected>Página atual</option>
+                  <option value="filtered">Todos filtrados</option>
+                </select>
+              </div>
+              <button id="managerApplyBulkBtn" type="button" class="primary" style="align-self: flex-end;">
+                ⚡ Aplicar em Massa
+              </button>
+            </div>
+            <span id="managerChangedHint" class="form-hint">Nenhuma alteração pendente.</span>
+          </div>
+        </div>
+
+        <!-- Tabela de Contests -->
+        <div class="card table-card">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width: 80px;"><button type="button" class="th-sort-btn" data-sort="id">ID ↕</button></th>
+                  <th><button type="button" class="th-sort-btn" data-sort="name">Nome do Contest ↕</button></th>
+                  <th>Horário de Início (Start Time)</th>
+                  <th>Horário de Fim (End Time)</th>
+                  <th style="width: 140px; text-align: center;">Habilitado</th>
+                  <th style="width: 120px; text-align: center;">Status</th>
+                </tr>
+              </thead>
+              <tbody id="contestTableBody">
+                <tr>
+                  <td colspan="6" style="text-align: center; color: var(--ink-muted); padding: 24px;">
+                    Carregando contests do DOMjudge...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Paginação de Contests -->
+          <div class="table-pagination">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <label for="managerPageSize" style="font-size: 0.8rem; color: var(--ink-muted);">Linhas:</label>
+              <select id="managerPageSize" style="width: auto; padding: 4px 8px;">
+                <option value="15">15</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="200">200</option>
+              </select>
+              <span id="managerPageStats" style="font-size: 0.82rem; color: var(--ink-muted);">Mostrando 0 de 0</span>
+            </div>
+            <div class="pagination-nav">
+              <button id="managerPrevPageBtn" type="button" class="dim btn-sm">Anterior</button>
+              <span id="managerPageLabel" style="font-size: 0.85rem; font-weight: 600;">Página 1 de 1</span>
+              <button id="managerNextPageBtn" type="button" class="dim btn-sm">Próxima</button>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section id="status" class="status"></section>
-      <section id="results" class="results"></section>
+      <!-- ===================================================================
+           MÓDULO 4: GERENCIADOR DE USUÁRIOS E TIMES (#users)
+           =================================================================== -->
+      <section id="view-users" class="spa-view">
+        <div class="view-hero">
+          <div>
+            <h2 class="view-hero-title">Gerenciamento de Usuários e Times</h2>
+            <p class="view-hero-subtitle">
+              Criação individual ou em lote (CSV), filtros rápidos, atribuição de categorias, labels e permissões.
+            </p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button id="openCreateModalBtn" class="primary" type="button">➕ Novo(s) Usuário(s)</button>
+            <button id="loadUsersBtn" class="dim" type="button">🔄 Atualizar</button>
+            <button id="exportUsersCsvBtn" class="dim" type="button">📥 Exportar CSV</button>
+          </div>
+        </div>
+
+        <!-- KPI Grid Usuários -->
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-icon">👥</div>
+            <div class="kpi-info">
+              <span class="kpi-label">Total de Usuários</span>
+              <span id="kpiUsersTotal" class="kpi-value">0</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="color: var(--success);">🟢</div>
+            <div class="kpi-info">
+              <span class="kpi-label">Usuários Ativos</span>
+              <span id="kpiUsersActive" class="kpi-value">0</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="color: var(--info);">🏷️</div>
+            <div class="kpi-info">
+              <span class="kpi-label">Categorias</span>
+              <span id="kpiUsersCategories" class="kpi-value">0</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="color: var(--brand);">🛡️</div>
+            <div class="kpi-info">
+              <span class="kpi-label">Times (Teams)</span>
+              <span id="kpiUsersTeams" class="kpi-value">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Toolbar Filtros & Lote Usuários -->
+        <div class="card table-toolbar">
+          <div class="filters-row">
+            <div class="form-group">
+              <label for="usersFilterText">Buscar por Nome / Username / Email</label>
+              <input id="usersFilterText" type="text" placeholder="Digite para buscar..." />
+            </div>
+            <div class="form-group">
+              <label for="usersFilterCategory">Filtrar Categoria</label>
+              <select id="usersFilterCategory">
+                <option value="all">Todas as categorias</option>
+              </select>
+            </div>
+            <div class="form-group" style="min-width: 220px;">
+              <label for="usersFilterLabel">Filtrar Labels (AND, OR, NOT)</label>
+              <input
+                id="usersFilterLabel"
+                type="text"
+                placeholder="ex: 2026-1 AND NOT monitor"
+                list="labelsFilterDataList"
+              />
+              <datalist id="labelsFilterDataList"></datalist>
+            </div>
+            <div class="form-group">
+              <label for="usersFilterRole">Filtrar Função (Role)</label>
+              <select id="usersFilterRole">
+                <option value="all">Todas as funções</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="usersFilterEnabled">Status</label>
+              <select id="usersFilterEnabled">
+                <option value="all">Todos</option>
+                <option value="enabled">Ativos / Habilitados</option>
+                <option value="disabled">Inativos / Desabilitados</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Ações em Lote de Usuários -->
+          <div class="bulk-actions-bar">
+            <div class="bulk-inputs">
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.72rem;">Escopo</label>
+                <select id="bulkScope" style="padding: 6px 10px;">
+                  <option value="selected" selected>Selecionados (0)</option>
+                  <option value="page">Página atual</option>
+                  <option value="filtered">Todos filtrados</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.72rem;">Nova Categoria</label>
+                <input id="bulkCategory" type="text" placeholder="Manter atual" list="categoryDataList" style="padding: 6px 10px; width: 140px;" />
+                <datalist id="categoryDataList"></datalist>
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.72rem;">Labels (vírgula)</label>
+                <input id="bulkLabels" type="text" placeholder="ex: turma-a" style="padding: 6px 10px; width: 130px;" />
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.72rem;">Modo de Labels</label>
+                <select id="bulkLabelsMode" style="padding: 6px 10px;">
+                  <option value="add" selected>Adicionar</option>
+                  <option value="replace">Substituir</option>
+                  <option value="remove">Remover</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label style="font-size: 0.72rem;">Status</label>
+                <select id="bulkEnabled" style="padding: 6px 10px;">
+                  <option value="keep" selected>Manter</option>
+                  <option value="enable">Habilitar</option>
+                  <option value="disable">Desabilitar</option>
+                </select>
+              </div>
+              <button id="applyBulkBtn" type="button" class="primary" style="align-self: flex-end;">
+                ⚡ Aplicar em Lote
+              </button>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <button id="saveChangesBtn" class="success" type="button" disabled>💾 Salvar Alterações</button>
+              <span id="changedHint" class="form-hint">Nenhuma alteração pendente.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabela de Usuários -->
+        <div class="card table-card">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width: 44px; text-align: center;">
+                    <input id="selectAllCheckbox" type="checkbox" title="Selecionar todos da página" />
+                  </th>
+                  <th><button type="button" class="th-sort-btn" data-sort="username">Username ↕</button></th>
+                  <th><button type="button" class="th-sort-btn" data-sort="name">Nome Completo ↕</button></th>
+                  <th>Email</th>
+                  <th><button type="button" class="th-sort-btn" data-sort="category">Categoria ↕</button></th>
+                  <th>Labels</th>
+                  <th><button type="button" class="th-sort-btn" data-sort="roles">Funções ↕</button></th>
+                  <th><button type="button" class="th-sort-btn" data-sort="enabled">Status ↕</button></th>
+                  <th style="text-align: right; width: 100px;">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="usersTableBody">
+                <tr>
+                  <td colspan="9" style="text-align: center; color: var(--ink-muted); padding: 24px;">
+                    Carregando usuários do DOMjudge...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Paginação de Usuários -->
+          <div class="table-pagination">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <label for="usersPageSize" style="font-size: 0.8rem; color: var(--ink-muted);">Linhas:</label>
+              <select id="usersPageSize" style="width: auto; padding: 4px 8px;">
+                <option value="15">15</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="200">200</option>
+              </select>
+              <span id="pageStats" style="font-size: 0.82rem; color: var(--ink-muted);">Mostrando 0 de 0</span>
+            </div>
+            <div class="pagination-nav">
+              <button id="prevPageBtn" type="button" class="dim btn-sm">Anterior</button>
+              <span id="pageLabel" style="font-size: 0.85rem; font-weight: 600;">Página 1 de 1</span>
+              <button id="nextPageBtn" type="button" class="dim btn-sm">Próxima</button>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
+    <!-- =====================================================================
+         MODAL: CRIAR NOVO(S) USUÁRIO(S) (Individual & Lote CSV)
+         ===================================================================== -->
+    <div id="createModal" class="modal-overlay" hidden>
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3 class="modal-title">Criar Novo(s) Usuário(s)</h3>
+          <button type="button" class="modal-close-btn" id="closeCreateModalBtn">&times;</button>
+        </div>
+
+        <div class="modal-tabs">
+          <button type="button" id="tabSingleBtn" class="modal-tab-btn active">
+            <span>👤</span> Usuário Individual
+          </button>
+          <button type="button" id="tabBatchBtn" class="modal-tab-btn">
+            <span>👥</span> Criar em Lote (CSV / TSV)
+          </button>
+        </div>
+
+        <!-- Formulário Usuário Único -->
+        <div id="createSingleContainer">
+          <form id="createSingleForm" class="creator-form-grid">
+          <div class="form-group">
+            <label for="createUsername">Username *</label>
+            <input id="createUsername" type="text" required placeholder="ex: joaosilva" />
+          </div>
+          <div class="form-group">
+            <label for="createName">Nome Completo *</label>
+            <input id="createName" type="text" required placeholder="ex: João Silva" />
+          </div>
+          <div class="form-group">
+            <label for="createEmail">Email</label>
+            <input id="createEmail" type="email" placeholder="ex: joao@email.com" />
+          </div>
+          <div class="form-group">
+            <label for="createPassword">Senha Inicial *</label>
+            <input id="createPassword" type="password" required placeholder="••••••••" />
+          </div>
+          <div class="form-group" style="grid-column: 1 / -1;">
+            <label class="checkbox-label">
+              <input id="createHasTeam" type="checkbox" checked />
+              <span>Criar Team no DOMjudge associado a este usuário</span>
+            </label>
+          </div>
+          <div class="form-group" id="createCategoryField">
+            <label for="createCategory">Categoria do Team</label>
+            <input id="createCategory" type="text" placeholder="ex: Estudantes" list="categoryDataList" />
+          </div>
+          <div class="form-group" id="createLabelsField">
+            <label for="createLabels">Labels do Team (vírgula)</label>
+            <input id="createLabels" type="text" placeholder="ex: turma-a, 2026-1" />
+          </div>
+          <div class="form-group" style="grid-column: 1 / -1;">
+            <label>Funções (Roles)</label>
+            <div style="display: flex; gap: 16px; margin-top: 6px;">
+              <label class="checkbox-label"><input type="checkbox" name="createRoles" value="team" checked /> Team</label>
+              <label class="checkbox-label"><input type="checkbox" name="createRoles" value="jury" /> Jury</label>
+              <label class="checkbox-label"><input type="checkbox" name="createRoles" value="admin" /> Admin</label>
+            </div>
+          </div>
+          <div class="form-group" style="grid-column: 1 / -1;">
+            <label class="checkbox-label">
+              <input id="createEnabled" type="checkbox" checked />
+              <span>Usuário Habilitado / Ativo</span>
+            </label>
+          </div>
+          <div style="grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px;">
+            <button type="button" id="cancelCreateSingleBtn" class="dim">Cancelar</button>
+            <button type="submit" class="primary">Criar Usuário</button>
+          </div>
+        </form>
+        </div>
+
+        <!-- Formulário Criação em Lote CSV -->
+        <div id="createBatchContainer" hidden>
+          <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px;">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button type="button" id="downloadBatchTemplateCsvBtn" class="dim" style="font-size: 0.82rem; padding: 6px 12px;">
+                📥 Baixar Modelo CSV
+              </button>
+              <button type="button" id="downloadBatchTemplateTsvBtn" class="dim" style="font-size: 0.82rem; padding: 6px 12px;">
+                📥 Baixar Modelo TSV
+              </button>
+            </div>
+            <div>
+              <label class="btn dim" style="font-size: 0.82rem; padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                📁 Carregar Arquivo CSV/TSV
+                <input type="file" id="batchFileInput" accept=".csv,.tsv,.txt" hidden />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-hint" style="background: var(--surface-subtle); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 14px; font-family: var(--font-mono);">
+            <strong>Formato por linha (CSV ou TSV):</strong><br />
+            <code>username, nome, email, senha, categoria, labels</code><br />
+            <small style="color: var(--ink-secondary);">Exemplo: aluno01, Ana Souza, ana@email.com, 123456, Turma A, vip;monitor</small>
+          </div>
+
+          <div class="creator-form-grid">
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label class="checkbox-label">
+                <input id="batchHasTeam" type="checkbox" checked />
+                <span>Criar Team para cada usuário do lote</span>
+              </label>
+            </div>
+            <div class="form-group">
+              <label for="batchDefaultCategory">Categoria padrão (se omitida)</label>
+              <input id="batchDefaultCategory" type="text" placeholder="ex: Estudantes" />
+            </div>
+            <div class="form-group">
+              <label for="batchDefaultLabels">Labels padrão (vírgula)</label>
+              <input id="batchDefaultLabels" type="text" placeholder="ex: 2026-1" />
+            </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label for="batchInputText">Lista de Usuários (Cole seu CSV/TSV aqui)</label>
+              <textarea
+                id="batchInputText"
+                rows="6"
+                placeholder="aluno01, Ana Souza, ana@email.com, senha123, Turma A, monitor&#10;aluno02, Bruno Lima, bruno@email.com, senha123, Turma B"
+              ></textarea>
+            </div>
+          </div>
+
+          <!-- Preview da Tabela em Tempo Real -->
+          <div id="batchPreviewSection" style="margin-top: 10px;">
+            <span class="form-hint" style="font-weight: 600;">Preview dos Usuários a Importar (<span id="batchCountBadge">0</span> identificados):</span>
+            <div class="batch-preview-table-wrap">
+              <table class="data-table" style="font-size: 0.8rem;">
+                <thead>
+                  <tr>
+                    <th>Username</th>
+                    <th>Nome</th>
+                    <th>Email</th>
+                    <th>Categoria</th>
+                    <th>Labels</th>
+                  </tr>
+                </thead>
+                <tbody id="batchPreviewBody">
+                  <tr>
+                    <td colspan="5" style="text-align: center; color: var(--ink-muted); padding: 12px;">
+                      Cole dados acima para ver o preview aqui.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
+            <button type="button" id="cancelCreateBatchBtn" class="dim">Cancelar</button>
+            <button id="processBatchBtn" type="button" class="primary">Processar e Adicionar Usuários</button>
+          </div>
+          <div id="batchFeedback" class="form-hint" style="margin-top: 8px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         MODAL: EDITAR USUÁRIO
+         ===================================================================== -->
+    <div id="editModal" class="modal-overlay" hidden>
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3 class="modal-title">Editar Usuário: <span id="editUserTitle" style="color: var(--brand);"></span></h3>
+          <button type="button" class="modal-close-btn" id="closeEditModalBtn">&times;</button>
+        </div>
+
+        <form id="editSingleForm" class="creator-form-grid">
+          <input id="editUserId" type="hidden" />
+          <div class="form-group">
+            <label for="editUsername">Username</label>
+            <input id="editUsername" type="text" required />
+          </div>
+          <div class="form-group">
+            <label for="editName">Nome Completo</label>
+            <input id="editName" type="text" required />
+          </div>
+          <div class="form-group">
+            <label for="editEmail">Email</label>
+            <input id="editEmail" type="email" />
+          </div>
+          <div class="form-group">
+            <label for="editPassword">Nova Senha (opcional)</label>
+            <input id="editPassword" type="password" placeholder="Deixe em branco para não alterar" />
+          </div>
+          <div class="form-group" style="grid-column: 1 / -1;">
+            <label class="checkbox-label">
+              <input id="editHasTeam" type="checkbox" />
+              <span>Possui Team no DOMjudge</span>
+            </label>
+          </div>
+          <div class="form-group" id="editCategoryField">
+            <label for="editCategory">Categoria do Team</label>
+            <input id="editCategory" type="text" list="categoryDataList" />
+          </div>
+          <div class="form-group" id="editLabelsField">
+            <label for="editLabels">Labels do Team (vírgula)</label>
+            <input id="editLabels" type="text" placeholder="ex: turma-a, 2026-1" />
+          </div>
+          <div class="form-group" style="grid-column: 1 / -1;">
+            <label>Funções (Roles)</label>
+            <div style="display: flex; gap: 16px; margin-top: 6px;">
+              <label class="checkbox-label"><input type="checkbox" name="editRoles" value="team" /> Team</label>
+              <label class="checkbox-label"><input type="checkbox" name="editRoles" value="jury" /> Jury</label>
+              <label class="checkbox-label"><input type="checkbox" name="editRoles" value="admin" /> Admin</label>
+            </div>
+          </div>
+          <div class="form-group" style="grid-column: 1 / -1;">
+            <label class="checkbox-label">
+              <input id="editEnabled" type="checkbox" />
+              <span>Usuário Habilitado / Ativo</span>
+            </label>
+          </div>
+          <div style="grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px;">
+            <button type="button" id="cancelEditModalBtn" class="dim">Cancelar</button>
+            <button type="submit" class="primary">Salvar Alterações</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         TOASTS CONTAINER
+         ===================================================================== -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Vendor Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <!-- Environment Configuration -->
+    <script src="config.js"></script>
+
+    <!-- Application Modules -->
+    <script src="creator.js"></script>
+    <script src="contest-manager.js"></script>
+    <script src="users.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

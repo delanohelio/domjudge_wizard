@@ -1,610 +1,682 @@
-const els = {
-  creatorName: document.getElementById("creatorName"),
-  creatorShortname: document.getElementById("creatorShortname"),
-  creatorTime: document.getElementById("creatorTime"),
-  creatorMemory: document.getElementById("creatorMemory"),
-  creatorMarkdown: document.getElementById("creatorMarkdown"),
-  markdownPreview: document.getElementById("markdownPreview"),
-  testsContainer: document.getElementById("testsContainer"),
-  importZipInput: document.getElementById("importZipInput"),
-  importZipBtn: document.getElementById("importZipBtn"),
-  addSampleTest: document.getElementById("addSampleTest"),
-  addSecretTest: document.getElementById("addSecretTest"),
-  previewMarkdownBtn: document.getElementById("previewMarkdownBtn"),
-  downloadPdfBtn: document.getElementById("downloadPdfBtn"),
-  downloadZipBtn: document.getElementById("downloadZipBtn"),
-  sendToDomjudgeBtn: document.getElementById("sendToDomjudgeBtn"),
-  includePdfCheckbox: document.getElementById("includePdfCheckbox"),
-  creatorFeedback: document.getElementById("creatorFeedback"),
-  creatorApiBase: document.getElementById("creatorApiBase"),
-  creatorProblemId: document.getElementById("creatorProblemId"),
-  creatorApiUser: document.getElementById("creatorApiUser"),
-  creatorApiPassword: document.getElementById("creatorApiPassword"),
-};
+// ============================================================================
+// DOMJUDGE WIZARD - CRIADOR DE QUESTÕES COM MARKDOWN STUDIO
+// ============================================================================
 
-function creatorMessage(message) {
-  if (els.creatorFeedback) {
-    els.creatorFeedback.textContent = message;
-  }
-}
-
-function sanitize(text) {
-  return String(text ?? "").replace(/[<>]/g, "");
-}
-
-function slugify(text) {
-  return String(text || "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "problema";
-}
-
-function parseMdWithMath(markdownText) {
-  const placeholders = [];
-  let text = markdownText || "";
-
-  // Protect $$...$$ (display math) from marked processing
-  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
-    const id = `MATHPLACEHOLDER${placeholders.length}END`;
-    placeholders.push({ id, tex, display: true });
-    return id;
-  });
-
-  // Protect $...$ (inline math) from marked processing
-  text = text.replace(/\$([^\$\n]+?)\$/g, (_, tex) => {
-    const id = `MATHPLACEHOLDER${placeholders.length}END`;
-    placeholders.push({ id, tex, display: false });
-    return id;
-  });
-
-  let html = window.marked ? window.marked.parse(text) : sanitize(text);
-
-  placeholders.forEach(({ id, tex, display }) => {
-    let rendered;
-    if (window.katex) {
-      try {
-        rendered = katex.renderToString(tex, { displayMode: display, throwOnError: false });
-      } catch (e) {
-        rendered = sanitize(display ? `$$${tex}$$` : `$${tex}$`);
-      }
-    } else {
-      rendered = sanitize(display ? `$$${tex}$$` : `$${tex}$`);
-    }
-    html = html.replace(id, rendered);
-  });
-
-  return html;
-}
-
-function highlightCodeBlocks(container) {
-  if (!container || !window.hljs) return;
-  container.querySelectorAll("pre code").forEach((codeEl) => {
-    window.hljs.highlightElement(codeEl);
-  });
-}
-
-function buildProblemHtml(markdownText) {
-  const body = parseMdWithMath(markdownText);
-  return [
-    "<html>",
-    "<head>",
-    "  <meta charset=\"utf-8\" />",
-    "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />",
-    "  <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.css\" />",
-    "  <link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css\" />",
-    "  <script src=\"https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.js\"></script>",
-    "  <script src=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js\"></script>",
-    "  <style>body{font-family:Arial,sans-serif;line-height:1.5;padding:20px;}pre{padding:12px;border-radius:8px;overflow:auto;background:#f6f8fa;}code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,Liberation Mono,Courier New,monospace;}</style>",
-    "</head>",
-    "<body>",
-    body,
-    "<script>if(window.hljs){window.hljs.highlightAll();}</script>",
-    "</body>",
-    "</html>",
-  ].join("\n");
-}
-
-async function generateProblemPdfBlob(markdownText) {
-  if (!window.html2pdf) {
-    throw new Error("html2pdf.js nao esta disponivel no navegador.");
-  }
-
-  const titleName = (els.creatorName?.value || "").trim();
-  const bodyHtml = parseMdWithMath(markdownText);
-
-  const container = document.createElement("div");
-  container.className = "pdf-export-container";
-  container.style.position = "fixed";
-  container.style.left = "-9999px";
-  container.style.top = "0";
-  container.style.width = "750px";
-  container.style.background = "#ffffff";
-  container.style.color = "#111111";
-  container.style.fontFamily = "Arial, Helvetica, sans-serif";
-  container.style.fontSize = "14px";
-  container.style.lineHeight = "1.6";
-  container.style.padding = "24px";
-  container.style.boxSizing = "border-box";
-
-  let headerHtml = "";
-  if (titleName) {
-    headerHtml = `<h1 style="font-size: 22px; margin-top: 0; margin-bottom: 16px; border-bottom: 2px solid #333; padding-bottom: 8px;">${sanitize(titleName)}</h1>`;
-  }
-
-  container.innerHTML = `
-    <style>
-      .pdf-export-container pre {
-        background: #f6f8fa;
-        padding: 12px;
-        border-radius: 6px;
-        border: 1px solid #e1e4e8;
-        overflow-x: auto;
-        font-family: monospace;
-        font-size: 13px;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-      .pdf-export-container code {
-        font-family: monospace;
-        background: #f0f0f0;
-        padding: 2px 4px;
-        border-radius: 4px;
-        font-size: 13px;
-      }
-      .pdf-export-container pre code {
-        background: none;
-        padding: 0;
-      }
-      .pdf-export-container table {
-        border-collapse: collapse;
-        width: 100%;
-        margin-bottom: 16px;
-      }
-      .pdf-export-container th, .pdf-export-container td {
-        border: 1px solid #ddd;
-        padding: 8px;
-        text-align: left;
-      }
-      .pdf-export-container th {
-        background-color: #f2f2f2;
-      }
-      .pdf-export-container img {
-        max-width: 100%;
-        height: auto;
-      }
-      .pdf-export-container h1, .pdf-export-container h2, .pdf-export-container h3 {
-        color: #111;
-        margin-top: 16px;
-        margin-bottom: 8px;
-      }
-    </style>
-    <div>
-      ${headerHtml}
-      ${bodyHtml}
-    </div>
-  `;
-
-  document.body.appendChild(container);
-  highlightCodeBlocks(container);
-
-  const opt = {
-    margin: [15, 15, 15, 15],
-    filename: "problem.pdf",
-    image: { type: "jpeg", quality: 0.98 },
-    html2canvas: { scale: 2, useCORS: true, logging: false },
-    jsPDF: { unit: "mm", format: "a4", orientation: "portrait" }
+const CreatorModule = (() => {
+  const els = {
+    creatorName: document.getElementById("creatorName"),
+    creatorShortname: document.getElementById("creatorShortname"),
+    creatorTime: document.getElementById("creatorTime"),
+    creatorMemory: document.getElementById("creatorMemory"),
+    creatorProblemId: document.getElementById("creatorProblemId"),
+    creatorMarkdown: document.getElementById("creatorMarkdown"),
+    markdownPreview: document.getElementById("markdownPreview"),
+    mdWorkspace: document.getElementById("mdWorkspace"),
+    testsContainer: document.getElementById("testsContainer"),
+    importZipInput: document.getElementById("importZipInput"),
+    importZipBtn: document.getElementById("importZipBtn"),
+    addSampleTest: document.getElementById("addSampleTest"),
+    addSecretTest: document.getElementById("addSecretTest"),
+    insertSampleTableBtn: document.getElementById("insertSampleTableBtn"),
+    downloadPdfBtn: document.getElementById("downloadPdfBtn"),
+    downloadZipBtn: document.getElementById("downloadZipBtn"),
+    sendToDomjudgeBtn: document.getElementById("sendToDomjudgeBtn"),
+    includePdfCheckbox: document.getElementById("includePdfCheckbox"),
+    creatorFeedback: document.getElementById("creatorFeedback"),
   };
 
-  try {
-    const worker = window.html2pdf().set(opt).from(container);
-    const pdfBlob = await worker.output("blob");
-    return pdfBlob;
-  } finally {
-    if (document.body.contains(container)) {
-      document.body.removeChild(container);
-    }
-  }
-}
+  let testCounter = 0;
+  let debounceTimer = null;
 
-function collectTestsFromForm() {
-  return Array.from(document.querySelectorAll(".test-item")).map((item, idx) => {
-    const type = item.querySelector("select")?.value || "sample";
-    const input = item.querySelector("textarea[data-kind='in']")?.value || "";
-    const answer = item.querySelector("textarea[data-kind='ans']")?.value || "";
-    return { id: idx + 1, type, input, answer };
-  });
-}
-
-function createTestRow(type = "sample", inputValue = "", answerValue = "") {
-  const wrapper = document.createElement("article");
-  wrapper.className = "test-item";
-  wrapper.innerHTML = `
-    <div class="test-item-head">
-      <strong>Teste</strong>
-      <button type="button" class="badge dim remove-test">Remover</button>
-    </div>
-    <div class="test-item-grid">
-      <div>
-        <label>Tipo</label>
-        <select>
-          <option value="sample">sample</option>
-          <option value="secret">secret</option>
-        </select>
-      </div>
-      <div>
-        <label>Input (.in)</label>
-        <textarea data-kind="in"></textarea>
-      </div>
-      <div>
-        <label>Output esperado (.ans)</label>
-        <textarea data-kind="ans"></textarea>
-      </div>
-    </div>
-  `;
-
-  wrapper.querySelector("select").value = type;
-  wrapper.querySelector("textarea[data-kind='in']").value = inputValue;
-  wrapper.querySelector("textarea[data-kind='ans']").value = answerValue;
-  wrapper.querySelector(".remove-test").addEventListener("click", () => {
-    wrapper.remove();
-  });
-  return wrapper;
-}
-
-function readIniValue(content, key) {
-  const regex = new RegExp(`^\\s*${key}\\s*=\\s*['\"]?([^'\"\\n]+)['\"]?`, "mi");
-  const match = String(content || "").match(regex);
-  return match ? match[1].trim() : "";
-}
-
-function extractBodyHtml(html) {
-  const text = String(html || "");
-  const bodyMatch = text.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  return bodyMatch ? bodyMatch[1] : text;
-}
-
-function htmlToMarkdownBasic(html) {
-  return String(html || "")
-    .replace(/<\s*br\s*\/?>/gi, "\n")
-    .replace(/<\s*\/p\s*>/gi, "\n\n")
-    .replace(/<\s*li\s*>/gi, "- ")
-    .replace(/<\s*\/li\s*>/gi, "\n")
-    .replace(/<\s*h1[^>]*>/gi, "# ")
-    .replace(/<\s*h2[^>]*>/gi, "## ")
-    .replace(/<\s*h3[^>]*>/gi, "### ")
-    .replace(/<[^>]+>/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function normalizeZipPath(path) {
-  return String(path || "").replace(/^\/+/, "");
-}
-
-function findFirstFileBySuffix(zip, suffix) {
-  const target = suffix.toLowerCase();
-  const names = Object.keys(zip.files);
-  return names.find((name) => {
-    const n = normalizeZipPath(name).toLowerCase();
-    return n === target || n.endsWith(`/${target}`);
-  });
-}
-
-function parseYamlName(problemYaml) {
-  const match = String(problemYaml || "").match(/^\s*name\s*:\s*['\"]?(.*?)['\"]?\s*$/mi);
-  return match ? match[1].trim() : "";
-}
-
-function stripZipExtension(filename) {
-  return String(filename || "").replace(/\.zip$/i, "");
-}
-
-function clearTests() {
-  if (els.testsContainer) {
-    els.testsContainer.innerHTML = "";
-  }
-}
-
-async function loadFromZipFile(file) {
-  if (!file) {
-    throw new Error("Selecione um arquivo ZIP.");
-  }
-  if (!window.JSZip) {
-    throw new Error("JSZip nao carregado.");
-  }
-
-  const zip = await window.JSZip.loadAsync(file);
-
-  const yamlPath = findFirstFileBySuffix(zip, "problem.yaml");
-  const iniPath = findFirstFileBySuffix(zip, "domjudge-problem.ini");
-  const markdownPath = findFirstFileBySuffix(zip, "problem.md");
-  const htmlPath = findFirstFileBySuffix(zip, "problem.html");
-  const metadataPath = findFirstFileBySuffix(zip, "creator-metadata.json");
-
-  if (metadataPath) {
-    const metadataText = await zip.file(metadataPath).async("string");
-    const metadata = JSON.parse(metadataText);
-    if (metadata?.shortname) {
-      els.creatorShortname.value = String(metadata.shortname).trim();
+  function showToast(msg, type = "info") {
+    if (window.showToast) {
+      window.showToast(msg, type);
+    } else {
+      console.log(`[${type}] ${msg}`);
     }
   }
 
-  if (yamlPath) {
-    const yamlText = await zip.file(yamlPath).async("string");
-    const name = parseYamlName(yamlText);
-    if (name) els.creatorName.value = name;
-  }
-
-  if (!els.creatorShortname.value) {
-    const rootCandidate = normalizeZipPath(yamlPath || "").split("/")[0];
-    if (rootCandidate && rootCandidate !== "problem.yaml") {
-      els.creatorShortname.value = rootCandidate;
-    } else if (file?.name) {
-      els.creatorShortname.value = stripZipExtension(file.name);
+  function setFeedback(msg, isError = false) {
+    if (els.creatorFeedback) {
+      els.creatorFeedback.textContent = msg;
+      els.creatorFeedback.style.color = isError ? "var(--danger)" : "var(--ink-muted)";
     }
   }
 
-  if (iniPath) {
-    const iniText = await zip.file(iniPath).async("string");
-    const timeLimit = readIniValue(iniText, "timelimit");
-    const memLimit = readIniValue(iniText, "memlimit");
-    if (timeLimit) els.creatorTime.value = Number(timeLimit) || els.creatorTime.value;
-    if (memLimit) els.creatorMemory.value = Number(memLimit) || els.creatorMemory.value;
+  function sanitize(text) {
+    return String(text ?? "").replace(/[<>]/g, "");
   }
 
-  if (markdownPath) {
-    const markdownText = await zip.file(markdownPath).async("string");
-    els.creatorMarkdown.value = markdownText;
-    renderMarkdownPreview();
-  } else if (htmlPath) {
-    const htmlText = await zip.file(htmlPath).async("string");
-    const body = extractBodyHtml(htmlText);
-    els.creatorMarkdown.value = htmlToMarkdownBasic(body);
-    renderMarkdownPreview();
+  function slugify(text) {
+    return (
+      String(text || "")
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "problema"
+    );
   }
 
-  const names = Object.keys(zip.files).map(normalizeZipPath);
-  const testPairs = { sample: {}, secret: {} };
+  // Parse Markdown com proteção para equações KaTeX ($...$ e $$...$$)
+  function parseMdWithMath(markdownText) {
+    const placeholders = [];
+    let text = markdownText || "";
 
-  for (const name of names) {
-    const lower = name.toLowerCase();
-    const match = lower.match(/data\/(sample|secret)\/(.+)\.(in|ans)$/);
-    if (!match) continue;
-    const type = match[1];
-    const base = match[2];
-    const ext = match[3];
-    if (!testPairs[type][base]) testPairs[type][base] = {};
-    testPairs[type][base][ext] = name;
-  }
-
-  clearTests();
-  for (const type of ["sample", "secret"]) {
-    const bases = Object.keys(testPairs[type]).sort((a, b) => a.localeCompare(b, "pt-BR"));
-    for (const base of bases) {
-      const pair = testPairs[type][base];
-      const input = pair.in ? await zip.file(pair.in).async("string") : "";
-      const ans = pair.ans ? await zip.file(pair.ans).async("string") : "";
-      els.testsContainer.appendChild(createTestRow(type, input, ans));
-    }
-  }
-
-  if (!els.testsContainer.children.length) {
-    els.testsContainer.appendChild(createTestRow("sample"));
-  }
-}
-
-function renderMarkdownPreview() {
-  if (!els.markdownPreview) return;
-  const markdown = els.creatorMarkdown?.value || "";
-  els.markdownPreview.innerHTML = parseMdWithMath(markdown);
-  highlightCodeBlocks(els.markdownPreview);
-}
-
-async function buildProblemZipBlob() {
-  if (!window.JSZip) {
-    throw new Error("JSZip nao carregado.");
-  }
-
-  const name = (els.creatorName?.value || "").trim();
-  if (!name) {
-    throw new Error("Informe o nome da questao.");
-  }
-
-  const shortname = (els.creatorShortname?.value || "").trim() || slugify(name);
-  const timeLimit = Number(els.creatorTime?.value || 1);
-  const memoryLimit = Number(els.creatorMemory?.value || 512);
-  const markdown = els.creatorMarkdown?.value || "";
-  const tests = collectTestsFromForm();
-
-  if (!tests.length) {
-    throw new Error("Adicione pelo menos um teste.");
-  }
-
-  const zip = new window.JSZip();
-
-  zip.file("problem.yaml", `name: \"${name.replace(/\"/g, "\\\"")}\"\n`);
-  zip.file("domjudge-problem.ini", `timelimit='${timeLimit}'\nmemlimit='${memoryLimit}'\n`);
-  zip.file("creator-metadata.json", JSON.stringify({ shortname }, null, 2));
-  zip.file("problem.md", markdown.endsWith("\n") ? markdown : `${markdown}\n`);
-  zip.file("problem.html", buildProblemHtml(markdown));
-
-  const shouldIncludePdf = els.includePdfCheckbox ? els.includePdfCheckbox.checked : true;
-  if (shouldIncludePdf && markdown.trim()) {
-    try {
-      creatorMessage("Gerando PDF para o pacote...");
-      const pdfBlob = await generateProblemPdfBlob(markdown);
-      if (pdfBlob) {
-        zip.file("problem.pdf", pdfBlob);
-      }
-    } catch (pdfErr) {
-      console.warn("Erro ao gerar PDF para o ZIP:", pdfErr);
-      creatorMessage(`Aviso: Nao foi possivel gerar PDF (${pdfErr.message}). Continuando geracao do ZIP...`);
-    }
-  }
-
-  const sampleFolder = zip.folder("data")?.folder("sample");
-  const secretFolder = zip.folder("data")?.folder("secret");
-  if (!sampleFolder || !secretFolder) {
-    throw new Error("Falha ao criar pastas de testes.");
-  }
-
-  const counter = { sample: 0, secret: 0 };
-  tests.forEach((test) => {
-    counter[test.type] += 1;
-    const n = counter[test.type];
-    const folder = test.type === "sample" ? sampleFolder : secretFolder;
-    folder.file(`${n}.in`, test.input.endsWith("\n") ? test.input : `${test.input}\n`);
-    folder.file(`${n}.ans`, test.answer.endsWith("\n") ? test.answer : `${test.answer}\n`);
-  });
-
-  return zip.generateAsync({ type: "blob" });
-}
-
-async function buildProblemZipBinaryFile() {
-  const blob = await buildProblemZipBlob();
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const shortname = (els.creatorShortname?.value || "").trim() || slugify(els.creatorName?.value || "problema");
-  return new File([bytes], `${shortname}.zip`, { type: "application/zip" });
-}
-
-function downloadBlob(blob, filename) {
-  const link = document.createElement("a");
-  const url = URL.createObjectURL(blob);
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-async function downloadProblemZip() {
-  try {
-    creatorMessage("Gerando ZIP...");
-    const blob = await buildProblemZipBlob();
-    const shortname = (els.creatorShortname?.value || "").trim() || slugify(els.creatorName?.value || "problema");
-    downloadBlob(blob, `${shortname}.zip`);
-    creatorMessage("ZIP gerado com sucesso.");
-  } catch (error) {
-    creatorMessage(`Erro: ${error.message}`);
-  }
-}
-
-async function downloadProblemPdf() {
-  try {
-    const markdown = els.creatorMarkdown?.value || "";
-    if (!markdown.trim()) {
-      throw new Error("Escreva o enunciado em Markdown antes de gerar o PDF.");
-    }
-    creatorMessage("Gerando PDF...");
-    const pdfBlob = await generateProblemPdfBlob(markdown);
-    const shortname = (els.creatorShortname?.value || "").trim() || slugify(els.creatorName?.value || "problema");
-    downloadBlob(pdfBlob, `${shortname}.pdf`);
-    creatorMessage("PDF gerado com sucesso.");
-  } catch (error) {
-    creatorMessage(`Erro ao gerar PDF: ${error.message}`);
-  }
-}
-
-function normalizeApiBase(url) {
-  const cleaned = String(url || "").trim().replace(/\/+$/, "");
-  if (cleaned.endsWith("/api/v4") || cleaned.endsWith("/api")) return cleaned;
-  return `${cleaned}/api/v4`;
-}
-
-function buildBasicAuthHeader(user, password) {
-  return `Basic ${btoa(`${user}:${password}`)}`;
-}
-
-async function sendProblemToDomjudge() {
-  try {
-    const apiBase = normalizeApiBase(els.creatorApiBase?.value || "");
-    const problemId = (els.creatorProblemId?.value || "").trim();
-    console.log(problemId)
-    const user = (els.creatorApiUser?.value || "").trim();
-    const password = els.creatorApiPassword?.value || "";
-
-    if (!apiBase || !user || !password) {
-      throw new Error("Preencha API base, usuario e senha.");
-    }
-
-    creatorMessage("Gerando pacote e enviando...");
-    const zipFile = await buildProblemZipBinaryFile();
-    const formData = new FormData();
-    formData.append("zip", zipFile);
-    if (problemId) {
-      formData.append("problem", problemId);
-    }
-
-    const endpoint = `${apiBase}/problems`;
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        Authorization: buildBasicAuthHeader(user, password),
-      },
-      body: formData,
+    // Proteger blocos de equação centralizada $$...$$
+    text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
+      const id = `MATHPLACEHOLDER${placeholders.length}END`;
+      placeholders.push({ id, tex, display: true });
+      return id;
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Falha no envio (${response.status}): ${text}`);
+    // Proteger fórmulas inline $...$
+    text = text.replace(/\$([^\$\n]+?)\$/g, (_, tex) => {
+      const id = `MATHPLACEHOLDER${placeholders.length}END`;
+      placeholders.push({ id, tex, display: false });
+      return id;
+    });
+
+    let html = window.marked ? window.marked.parse(text) : sanitize(text);
+
+    placeholders.forEach(({ id, tex, display }) => {
+      let rendered;
+      if (window.katex) {
+        try {
+          rendered = window.katex.renderToString(tex, {
+            displayMode: display,
+            throwOnError: false,
+          });
+        } catch (e) {
+          rendered = sanitize(display ? `$$${tex}$$` : `$${tex}$`);
+        }
+      } else {
+        rendered = sanitize(display ? `$$${tex}$$` : `$${tex}$`);
+      }
+      html = html.replace(id, rendered);
+    });
+
+    return html;
+  }
+
+  function highlightCodeBlocks(container) {
+    if (!container || !window.hljs) return;
+    container.querySelectorAll("pre code").forEach((codeEl) => {
+      window.hljs.highlightElement(codeEl);
+    });
+  }
+
+  function renderPreview() {
+    if (!els.markdownPreview || !els.creatorMarkdown) return;
+    const raw = els.creatorMarkdown.value;
+    if (!raw.trim()) {
+      els.markdownPreview.innerHTML =
+        '<p style="color: var(--ink-muted); font-style: italic;">O preview do enunciado aparecerá aqui conforme você digita...</p>';
+      return;
+    }
+    els.markdownPreview.innerHTML = parseMdWithMath(raw);
+    highlightCodeBlocks(els.markdownPreview);
+  }
+
+  function triggerLivePreview() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(renderPreview, 120);
+  }
+
+  // --------------------------------------------------------------------------
+  // TOOLBAR & ATALHOS DO MARKDOWN STUDIO
+  // --------------------------------------------------------------------------
+  function insertFormatting(prefix, suffix = "", defaultText = "") {
+    const textarea = els.creatorMarkdown;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = textarea.value.substring(start, end) || defaultText;
+    const replacement = prefix + selected + suffix;
+
+    textarea.setRangeText(replacement, start, end, "select");
+    textarea.focus();
+
+    // Se inseriu sem texto selecionado, posiciona o cursor entre o prefixo e sufixo
+    if (start === end) {
+      textarea.setSelectionRange(start + prefix.length, start + prefix.length + selected.length);
+    }
+    triggerLivePreview();
+  }
+
+  function insertTemplateICPC() {
+    const template = `# \${1:Título do Problema}
+
+Descrição contextualizada do problema aqui. Explique a motivação e a tarefa com clareza. Você pode utilizar fórmulas matemáticas como $N \\le 10^5$ e $\\mathcal{O}(N \\log N)$.
+
+## Entrada
+A primeira linha contém um inteiro $T$ indicando o número de casos de teste. Cada caso consiste de...
+
+## Saída
+Para cada caso de teste, imprima a resposta requerida em uma única linha.
+
+## Exemplos
+| Entrada | Saída |
+|---|---|
+| \`4\`<br>\`1 2 3 4\` | \`10\` |
+
+## Notas
+Explicações adicionais sobre os casos de teste de exemplo.
+`;
+    const textarea = els.creatorMarkdown;
+    if (!textarea) return;
+
+    if (textarea.value.trim() && !confirm("Deseja substituir o conteúdo atual pelo Template Padrão ICPC/OBI?")) {
+      return;
     }
 
-    creatorMessage(problemId ? "Problema atualizado com sucesso no DOMjudge." : "Problema criado com sucesso no DOMjudge.");
-  } catch (error) {
-    creatorMessage(`Erro: ${error.message}`);
+    textarea.value = template;
+    textarea.focus();
+    renderPreview();
+    showToast("Template ICPC/OBI inserido com sucesso!", "success");
   }
-}
 
-async function importZipToForm() {
-  try {
-    creatorMessage("Lendo ZIP e preenchendo formulario...");
-    const file = els.importZipInput?.files?.[0];
-    await loadFromZipFile(file);
-    creatorMessage("Formulario preenchido a partir do ZIP.");
-  } catch (error) {
-    creatorMessage(`Erro: ${error.message}`);
+  function insertSampleTableFromTests() {
+    const sampleCards = Array.from(
+      els.testsContainer ? els.testsContainer.querySelectorAll('.test-card[data-type="sample"]') : []
+    );
+
+    if (sampleCards.length === 0) {
+      showToast("Nenhum caso de teste 'Sample' encontrado para gerar a tabela.", "warning");
+      return;
+    }
+
+    let tableMd = `\n## Exemplos de Entrada e Saída\n\n| Exemplo de Entrada | Exemplo de Saída |\n|---|---|\n`;
+
+    sampleCards.forEach((card, idx) => {
+      const inText = card.querySelector('textarea[data-kind="in"]')?.value || "";
+      const outText = card.querySelector('textarea[data-kind="out"]')?.value || "";
+
+      const formattedIn = inText.trim().replace(/\n/g, "<br>");
+      const formattedOut = outText.trim().replace(/\n/g, "<br>");
+
+      tableMd += `| \`${formattedIn}\` | \`${formattedOut}\` |\n`;
+    });
+
+    tableMd += "\n";
+
+    const textarea = els.creatorMarkdown;
+    if (textarea) {
+      textarea.value += tableMd;
+      renderPreview();
+      showToast("Tabela de exemplos gerada a partir dos testes cadastrados!", "success");
+    }
   }
-}
 
-if (els.addSampleTest) {
-  els.addSampleTest.addEventListener("click", () => {
-    els.testsContainer.appendChild(createTestRow("sample"));
-  });
-}
+  function setupToolbar() {
+    document.querySelectorAll(".md-toolbar-btn[data-action]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const action = btn.getAttribute("data-action");
+        switch (action) {
+          case "h1":
+            insertFormatting("# ", "", "Título 1");
+            break;
+          case "h2":
+            insertFormatting("## ", "", "Subtítulo 2");
+            break;
+          case "h3":
+            insertFormatting("### ", "", "Seção 3");
+            break;
+          case "bold":
+            insertFormatting("**", "**", "texto em negrito");
+            break;
+          case "italic":
+            insertFormatting("*", "*", "texto em itálico");
+            break;
+          case "code":
+            insertFormatting("`", "`", "código");
+            break;
+          case "codeblock":
+            insertFormatting("```cpp\n", "\n```", "// seu código aqui");
+            break;
+          case "math-inline":
+            insertFormatting("$", "$", "\\mathcal{O}(N)");
+            break;
+          case "math-block":
+            insertFormatting("$$\n", "\n$$", "\\sum_{i=1}^{n} a_i");
+            break;
+          case "table":
+            insertFormatting(
+              "\n| Coluna 1 | Coluna 2 |\n|---|---|\n| Dado A | Dado B |\n\n"
+            );
+            break;
+          case "template-icpc":
+            insertTemplateICPC();
+            break;
+        }
+      });
+    });
 
-if (els.addSecretTest) {
-  els.addSecretTest.addEventListener("click", () => {
-    els.testsContainer.appendChild(createTestRow("secret"));
-  });
-}
+    if (els.insertSampleTableBtn) {
+      els.insertSampleTableBtn.addEventListener("click", insertSampleTableFromTests);
+    }
 
-if (els.previewMarkdownBtn) {
-  els.previewMarkdownBtn.addEventListener("click", renderMarkdownPreview);
-}
+    // Alternância de modo de visualização do Markdown Studio
+    document.querySelectorAll(".md-view-btn[data-view-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".md-view-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
 
-if (els.downloadPdfBtn) {
-  els.downloadPdfBtn.addEventListener("click", downloadProblemPdf);
-}
+        const mode = btn.getAttribute("data-view-mode");
+        if (els.mdWorkspace) {
+          els.mdWorkspace.className = `md-workspace mode-${mode}`;
+        }
+      });
+    });
 
-if (els.downloadZipBtn) {
-  els.downloadZipBtn.addEventListener("click", downloadProblemZip);
-}
+    // Atalhos de teclado no textarea
+    if (els.creatorMarkdown) {
+      els.creatorMarkdown.addEventListener("input", triggerLivePreview);
 
-if (els.sendToDomjudgeBtn) {
-  els.sendToDomjudgeBtn.addEventListener("click", sendProblemToDomjudge);
-}
+      els.creatorMarkdown.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+          e.preventDefault();
+          insertFormatting("**", "**", "texto em negrito");
+        } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i") {
+          e.preventDefault();
+          insertFormatting("*", "*", "texto em itálico");
+        } else if (e.key === "Tab") {
+          e.preventDefault();
+          const start = els.creatorMarkdown.selectionStart;
+          const end = els.creatorMarkdown.selectionEnd;
+          els.creatorMarkdown.setRangeText("  ", start, end, "end");
+          triggerLivePreview();
+        }
+      });
+    }
+  }
 
-if (els.importZipBtn) {
-  els.importZipBtn.addEventListener("click", importZipToForm);
-}
+  // --------------------------------------------------------------------------
+  // GERENCIAMENTO DE CASOS DE TESTE (SAMPLE & SECRET)
+  // --------------------------------------------------------------------------
+  function createTestCard(type = "sample", initialIn = "", initialOut = "") {
+    testCounter += 1;
+    const testId = `test_${testCounter}`;
+    const card = document.createElement("div");
+    card.className = "test-card";
+    card.dataset.type = type;
+    card.id = testId;
 
-if (els.testsContainer && !els.testsContainer.children.length) {
-  els.testsContainer.appendChild(createTestRow("sample"));
-}
+    const badgeClass = type === "sample" ? "pill-category" : "pill-role";
+    const badgeText = type === "sample" ? "Sample (Exemplo Público)" : "Secret (Teste Oculto)";
 
-if (els.creatorMarkdown) {
-  els.creatorMarkdown.addEventListener("input", renderMarkdownPreview);
-  renderMarkdownPreview();
-}
+    card.innerHTML = `
+      <div class="test-card-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="pill ${badgeClass}">${badgeText}</span>
+          <strong style="font-size: 0.85rem; font-family: var(--font-mono);">#${testCounter}</strong>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button type="button" class="btn-sm dim btn-dup" title="Duplicar Caso de Teste">📋 Duplicar</button>
+          <button type="button" class="btn-sm danger btn-del" title="Excluir Caso de Teste">🗑️ Excluir</button>
+        </div>
+      </div>
+      <div class="test-grid">
+        <div class="test-field">
+          <label>Entrada (.in)</label>
+          <textarea data-kind="in" placeholder="Cole a entrada do teste aqui...">${sanitize(initialIn)}</textarea>
+        </div>
+        <div class="test-field">
+          <label>Saída Esperada (.ans / .out)</label>
+          <textarea data-kind="out" placeholder="Cole a saída esperada aqui...">${sanitize(initialOut)}</textarea>
+        </div>
+      </div>
+    `;
+
+    card.querySelector(".btn-del").addEventListener("click", () => {
+      card.remove();
+      showToast(`Caso de teste #${testCounter} removido.`, "info");
+    });
+
+    card.querySelector(".btn-dup").addEventListener("click", () => {
+      const inVal = card.querySelector('textarea[data-kind="in"]').value;
+      const outVal = card.querySelector('textarea[data-kind="out"]').value;
+      createTestCard(type, inVal, outVal);
+      showToast("Caso de teste duplicado!", "success");
+    });
+
+    if (els.testsContainer) {
+      els.testsContainer.appendChild(card);
+    }
+  }
+
+  function clearAllTests() {
+    if (els.testsContainer) {
+      els.testsContainer.innerHTML = "";
+    }
+    testCounter = 0;
+  }
+
+  // --------------------------------------------------------------------------
+  // GERAÇÃO DE PDF E PACOTE ZIP
+  // --------------------------------------------------------------------------
+  function buildProblemHtml(markdownText) {
+    const body = parseMdWithMath(markdownText);
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${sanitize(els.creatorName?.value || "Problema")}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css" />
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; padding: 24px; color: #111827; }
+    h1 { font-size: 24px; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px; margin-bottom: 16px; }
+    h2 { font-size: 18px; margin-top: 20px; margin-bottom: 8px; color: #1f2937; }
+    pre { background: #f3f4f6; padding: 12px; border-radius: 6px; overflow-x: auto; }
+    code { font-family: monospace; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; }
+    th { background: #f9fafb; font-weight: bold; }
+  </style>
+</head>
+<body>
+  ${body}
+</body>
+</html>`;
+  }
+
+  async function generatePdfBlob() {
+    if (!window.html2pdf) {
+      throw new Error("Biblioteca html2pdf não carregada.");
+    }
+    const container = document.createElement("div");
+    container.style.padding = "24px";
+    container.style.background = "#fff";
+    container.style.color = "#000";
+    container.style.fontFamily = "Arial, sans-serif";
+    container.innerHTML = parseMdWithMath(els.creatorMarkdown?.value || "");
+
+    const opt = {
+      margin: 15,
+      filename: "problem.pdf",
+      image: { type: "jpeg", quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+    };
+
+    return await window.html2pdf().set(opt).from(container).outputPdf("blob");
+  }
+
+  async function downloadPdf() {
+    try {
+      showToast("Gerando PDF do enunciado...", "info");
+      const blob = await generatePdfBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${slugify(els.creatorName?.value || "problem")}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("PDF baixado com sucesso!", "success");
+    } catch (err) {
+      showToast(`Erro ao gerar PDF: ${err.message}`, "error");
+    }
+  }
+
+  function collectTestsData() {
+    const cards = Array.from(
+      els.testsContainer ? els.testsContainer.querySelectorAll(".test-card") : []
+    );
+    const samples = [];
+    const secrets = [];
+
+    cards.forEach((card) => {
+      const type = card.dataset.type || "sample";
+      const inVal = card.querySelector('textarea[data-kind="in"]')?.value || "";
+      const outVal = card.querySelector('textarea[data-kind="out"]')?.value || "";
+
+      if (type === "sample") {
+        samples.push({ in: inVal, out: outVal });
+      } else {
+        secrets.push({ in: inVal, out: outVal });
+      }
+    });
+
+    return { samples, secrets };
+  }
+
+  async function generateZipBlob() {
+    if (!window.JSZip) {
+      throw new Error("Biblioteca JSZip não carregada.");
+    }
+    const zip = new window.JSZip();
+    const name = els.creatorName?.value?.trim() || "Problema";
+    const shortname = els.creatorShortname?.value?.trim() || slugify(name);
+    const timeLimit = parseFloat(els.creatorTime?.value) || 1.0;
+    const memoryLimit = parseInt(els.creatorMemory?.value, 10) || 512;
+    const markdown = els.creatorMarkdown?.value || "";
+
+    // problem.yaml
+    const problemYaml = `name: "${name}"\nlimits:\n  time: ${timeLimit}\n  memory: ${memoryLimit}\n`;
+    zip.file("problem.yaml", problemYaml);
+
+    // domjudge-problem.ini
+    const ini = `short-name = ${shortname}\nname = "${name}"\ntimelimit = ${timeLimit}\n`;
+    zip.file("domjudge-problem.ini", ini);
+
+    // problem.pdf / problem.html
+    const htmlStatement = buildProblemHtml(markdown);
+    zip.file("problem.html", htmlStatement);
+    zip.file("statement.md", markdown);
+
+    if (els.includePdfCheckbox?.checked) {
+      try {
+        const pdfBlob = await generatePdfBlob();
+        zip.file("problem.pdf", pdfBlob);
+      } catch (err) {
+        console.warn("PDF não pôde ser anexado ao ZIP:", err);
+      }
+    }
+
+    // Test cases (data/sample e data/secret)
+    const { samples, secrets } = collectTestsData();
+    const sampleFolder = zip.folder("data/sample");
+    const secretFolder = zip.folder("data/secret");
+
+    samples.forEach((test, idx) => {
+      const prefix = `sample-${idx + 1}`;
+      sampleFolder.file(`${prefix}.in`, test.in);
+      sampleFolder.file(`${prefix}.ans`, test.out);
+    });
+
+    secrets.forEach((test, idx) => {
+      const prefix = `secret-${idx + 1}`;
+      secretFolder.file(`${prefix}.in`, test.in);
+      secretFolder.file(`${prefix}.ans`, test.out);
+    });
+
+    return await zip.generateAsync({ type: "blob" });
+  }
+
+  async function downloadZip() {
+    try {
+      showToast("Empacotando problema em formato DOMjudge...", "info");
+      const zipBlob = await generateZipBlob();
+      const filename = `${slugify(els.creatorName?.value || "problem")}.zip`;
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(`Pacote ${filename} baixado com sucesso!`, "success");
+    } catch (err) {
+      showToast(`Erro ao gerar pacote ZIP: ${err.message}`, "error");
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // IMPORTAR PACOTE ZIP EXISTENTE
+  // --------------------------------------------------------------------------
+  async function importZipFile(file) {
+    if (!file || !window.JSZip) return;
+    try {
+      showToast("Lendo estrutura do pacote ZIP...", "info");
+      const zip = await window.JSZip.loadAsync(file);
+      clearAllTests();
+
+      // Ler statement.md ou problem.html
+      const mdFile = zip.file("statement.md") || zip.file("problem.md");
+      if (mdFile) {
+        const content = await mdFile.async("string");
+        if (els.creatorMarkdown) {
+          els.creatorMarkdown.value = content;
+          renderPreview();
+        }
+      }
+
+      // Ler domjudge-problem.ini
+      const iniFile = zip.file("domjudge-problem.ini");
+      if (iniFile) {
+        const iniText = await iniFile.async("string");
+        const nameMatch = iniText.match(/name\s*=\s*"?([^"\n\r]+)"?/i);
+        const shortMatch = iniText.match(/short-name\s*=\s*"?([^"\n\r]+)"?/i);
+        const timeMatch = iniText.match(/timelimit\s*=\s*([0-9.]+)/i);
+
+        if (nameMatch && els.creatorName) els.creatorName.value = nameMatch[1].trim();
+        if (shortMatch && els.creatorShortname) els.creatorShortname.value = shortMatch[1].trim();
+        if (timeMatch && els.creatorTime) els.creatorTime.value = timeMatch[1].trim();
+      }
+
+      // Ler testes sample e secret
+      const filePaths = Object.keys(zip.files);
+      const testMap = {};
+
+      filePaths.forEach((path) => {
+        const match = path.match(/^data\/(sample|secret)\/([^/]+)\.(in|ans|out)$/i);
+        if (match) {
+          const type = match[1].toLowerCase();
+          const baseName = match[2];
+          const ext = match[3].toLowerCase();
+          const key = `${type}::${baseName}`;
+
+          if (!testMap[key]) testMap[key] = { type, baseName };
+          testMap[key][ext === "in" ? "inPath" : "outPath"] = path;
+        }
+      });
+
+      for (const key of Object.keys(testMap)) {
+        const item = testMap[key];
+        let inContent = "";
+        let outContent = "";
+
+        if (item.inPath) {
+          inContent = await zip.file(item.inPath).async("string");
+        }
+        if (item.outPath) {
+          outContent = await zip.file(item.outPath).async("string");
+        }
+
+        createTestCard(item.type, inContent, outContent);
+      }
+
+      showToast("Pacote ZIP importado com sucesso!", "success");
+    } catch (err) {
+      showToast(`Falha ao importar ZIP: ${err.message}`, "error");
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // ENVIAR DIRETAMENTE PARA A API DO DOMJUDGE
+  // --------------------------------------------------------------------------
+  async function sendToDomjudge() {
+    const creds = window.getApiCredentials ? window.getApiCredentials() : null;
+    if (!creds || !creds.apiBase) {
+      showToast("Sessão da API não configurada. Conecte-se primeiro.", "error");
+      return;
+    }
+
+    try {
+      showToast("Gerando pacote e enviando para o DOMjudge...", "info");
+      const zipBlob = await generateZipBlob();
+      const formData = new FormData();
+      formData.append("zip", zipBlob, "problem.zip");
+
+      const problemId = els.creatorProblemId?.value?.trim();
+      let url = `${creds.apiBase}/problems`;
+      let method = "POST";
+
+      if (problemId) {
+        url = `${creds.apiBase}/problems/${encodeURIComponent(problemId)}`;
+        method = "PUT";
+      }
+
+      const headers = {};
+      if (creds.user && creds.password) {
+        headers["Authorization"] = `Basic ${btoa(`${creds.user}:${creds.password}`)}`;
+      }
+
+      const res = await fetch(url, {
+        method,
+        headers,
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errTxt = await res.text();
+        throw new Error(`API HTTP ${res.status}: ${errTxt || res.statusText}`);
+      }
+
+      const json = await res.json().catch(() => ({}));
+      const assignedId = json.id || problemId || "criado com sucesso";
+      showToast(`Problema salvo no DOMjudge com ID: ${assignedId}`, "success");
+      setFeedback(`Problema enviado com sucesso! ID: ${assignedId}`);
+    } catch (err) {
+      if (err.message && (err.message.includes("401") || err.message.includes("403"))) {
+        if (window.handleApiUnauthorized) window.handleApiUnauthorized(err);
+      }
+      showToast(`Falha ao enviar para API: ${err.message}`, "error");
+      setFeedback(`Erro ao enviar: ${err.message}`, true);
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // INICIALIZAÇÃO DO MÓDULO
+  // --------------------------------------------------------------------------
+  function init() {
+    setupToolbar();
+
+    if (els.addSampleTest) {
+      els.addSampleTest.addEventListener("click", () => createTestCard("sample"));
+    }
+    if (els.addSecretTest) {
+      els.addSecretTest.addEventListener("click", () => createTestCard("secret"));
+    }
+    if (els.downloadPdfBtn) {
+      els.downloadPdfBtn.addEventListener("click", downloadPdf);
+    }
+    if (els.downloadZipBtn) {
+      els.downloadZipBtn.addEventListener("click", downloadZip);
+    }
+    if (els.sendToDomjudgeBtn) {
+      els.sendToDomjudgeBtn.addEventListener("click", sendToDomjudge);
+    }
+
+    if (els.importZipBtn && els.importZipInput) {
+      els.importZipBtn.addEventListener("click", () => els.importZipInput.click());
+      els.importZipInput.addEventListener("change", (e) => {
+        const file = e.target.files?.[0];
+        if (file) importZipFile(file);
+      });
+    }
+
+    // Criar 1 sample de exemplo inicial
+    if (els.testsContainer && els.testsContainer.children.length === 0) {
+      createTestCard("sample", "4\n1 2 3 4", "10");
+    }
+
+    renderPreview();
+  }
+
+  return { init, renderPreview, createTestCard };
+})();
+
+document.addEventListener("DOMContentLoaded", () => {
+  CreatorModule.init();
+});
