@@ -1,0 +1,26 @@
+{
+  "name": "domjudge-wizard",
+  "version": "1.0.0",
+  "description": "DOMjudge Wizard - Suite Completa para Gerenciamento e Criação de Problemas",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "domjudge",
+    "icpc",
+    "maratona",
+    "wizard",
+    "puppeteer",
+    "pdf"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "puppeteer": "^24.3.0"
+  }
+}

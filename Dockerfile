@@ -1,16 +1,56 @@
-FROM nginx:alpine
+FROM node:20-bookworm-slim
 
-ARG PORT=7070
-ENV PORT=${PORT}
+# Instalar Chromium e dependências para renderização headless de PDF
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgbm1 \
+    libgcc1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copiar arquivos da aplicação para o diretório raiz do Nginx
-COPY . /usr/share/nginx/html/
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    PORT=7070 \
+    NODE_ENV=production
 
-# Configurar script de entrypoint executável
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+WORKDIR /app
 
-EXPOSE ${PORT}
+COPY package*.json ./
+RUN npm ci --omit=dev
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["nginx", "-g", "daemon off;"]
+COPY . .
+
+EXPOSE 7070
+
+CMD ["npm", "start"]

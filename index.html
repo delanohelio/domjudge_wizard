@@ -210,8 +210,14 @@
               <input id="creatorName" type="text" placeholder="Ex.: Soma de Vetores" />
             </div>
             <div class="form-group">
-              <label for="creatorShortname">Shortname (opcional)</label>
-              <input id="creatorShortname" type="text" placeholder="Ex.: soma-vetores" />
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label for="creatorProblemId" style="margin: 0;">ID do Problema (Shortname)</label>
+                <label class="checkbox-label" style="font-size: 0.8rem; margin: 0; cursor: pointer; font-weight: 500;" title="Marque para atualizar um problema existente com este ID na API">
+                  <input id="creatorIsEditCheckbox" type="checkbox" />
+                  <span>Atualizar existente</span>
+                </label>
+              </div>
+              <input id="creatorProblemId" type="text" placeholder="Ex.: soma-vetores" />
             </div>
             <div class="form-group">
               <label for="creatorTime">Tempo Limite (segundos)</label>
@@ -220,10 +226,6 @@
             <div class="form-group">
               <label for="creatorMemory">Memória Limite (MB)</label>
               <input id="creatorMemory" type="number" min="16" step="64" value="512" />
-            </div>
-            <div class="form-group">
-              <label for="creatorProblemId">ID do Problema na API (para atualizar)</label>
-              <input id="creatorProblemId" type="text" placeholder="ex.: soma-vetores (opcional)" />
             </div>
           </div>
         </div>
@@ -568,6 +570,7 @@
                   <option value="add" selected>Adicionar</option>
                   <option value="replace">Substituir</option>
                   <option value="remove">Remover</option>
+                  <option value="clear">Limpar (apenas username)</option>
                 </select>
               </div>
               <div class="form-group" style="margin: 0;">
@@ -748,7 +751,7 @@
             </div>
             <div class="form-group">
               <label for="batchDefaultCategory">Categoria padrão (se omitida)</label>
-              <input id="batchDefaultCategory" type="text" placeholder="ex: Estudantes" />
+              <input id="batchDefaultCategory" type="text" placeholder="ex: Estudantes" list="categoryDataList" />
             </div>
             <div class="form-group">
               <label for="batchDefaultLabels">Labels padrão (vírgula)</label>
@@ -878,9 +881,9 @@
     <script src="config.js"></script>
 
     <!-- Application Modules -->
-    <script src="creator.js"></script>
-    <script src="contest-manager.js"></script>
-    <script src="users.js"></script>
-    <script src="app.js"></script>
+    <script src="creator.js?v=2.4"></script>
+    <script src="contest-manager.js?v=2.4"></script>
+    <script src="users.js?v=2.4"></script>
+    <script src="app.js?v=2.4"></script>
   </body>
 </html>

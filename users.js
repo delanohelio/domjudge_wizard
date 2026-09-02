@@ -115,14 +115,61 @@ const UsersModule = (() => {
     return String(text ?? "").replace(/[<>]/g, "");
   }
 
+  function getUserCustomLabels(user) {
+    if (!user) return [];
+    const uname = (user.username || "").trim().toLowerCase();
+    return (user.teamLabels || []).filter((l) => l && l.trim().toLowerCase() !== uname);
+  }
+
+  function isParticipantsCategory(cat) {
+    if (!cat || typeof cat !== "string") return false;
+    return /participants/i.test(cat.trim());
+  }
+
+  const STORAGE_CUSTOM_CATEGORIES_KEY = "domjudge_wizard_custom_categories";
+
+  function loadStoredCustomCategories() {
+    try {
+      const raw = localStorage.getItem(STORAGE_CUSTOM_CATEGORIES_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          arr.forEach((cat) => {
+            if (cat && typeof cat === "string" && cat.trim()) {
+              const trimmed = cat.trim();
+              const slug = trimmed.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-");
+              state.categoriesMap.set(slug, trimmed);
+            }
+          });
+        }
+      }
+    } catch (e) {}
+  }
+
+  function saveStoredCustomCategory(cat) {
+    if (!cat || typeof cat !== "string") return;
+    const trimmed = cat.trim();
+    if (!trimmed) return;
+    try {
+      const raw = localStorage.getItem(STORAGE_CUSTOM_CATEGORIES_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      if (!arr.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+        arr.push(trimmed);
+        localStorage.setItem(STORAGE_CUSTOM_CATEGORIES_KEY, JSON.stringify(arr));
+      }
+      const slug = trimmed.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-");
+      state.categoriesMap.set(slug, trimmed);
+    } catch (e) {}
+  }
+
   function isUserChanged(user) {
     const orig = state.originalUsersMap.get(user.id);
     if (!orig) return true; // Novo usuário não salvo
 
     const origRoles = (orig.roles || []).slice().sort().join(",");
     const currRoles = (user.roles || []).slice().sort().join(",");
-    const origLabels = (orig.teamLabels || []).slice().sort().join(",");
-    const currLabels = (user.teamLabels || []).slice().sort().join(",");
+    const origLabels = getUserCustomLabels(orig).slice().sort().join(",");
+    const currLabels = getUserCustomLabels(user).slice().sort().join(",");
 
     return (
       user.name !== orig.name ||
@@ -188,10 +235,10 @@ const UsersModule = (() => {
         headers["Authorization"] = `Basic ${btoa(`${creds.user}:${creds.password}`)}`;
       }
 
-      // Buscar Contests, Grupos, Times e Usuários em paralelo
-      const [contestsRes, groupsFallbackRes, teamsRes, usersRes] = await Promise.all([
-        fetch(`${creds.apiBase}/contests`, { headers }).catch(() => null),
-        fetch(`${creds.apiBase}/groups`, { headers }).catch(() => null),
+      await loadCategories();
+
+      // Buscar Contests, Times e Usuários em paralelo
+      const [teamsRes, usersRes] = await Promise.all([
         fetch(`${creds.apiBase}/teams`, { headers }).catch(() => null),
         fetch(`${creds.apiBase}/users`, { headers }),
       ]);
@@ -200,40 +247,26 @@ const UsersModule = (() => {
         throw new Error(`API HTTP ${usersRes.status}: ${usersRes.statusText}`);
       }
 
-      const rawContests = contestsRes && contestsRes.ok ? await contestsRes.json().catch(() => []) : [];
-      const rawGroupsFallback = groupsFallbackRes && groupsFallbackRes.ok ? await groupsFallbackRes.json().catch(() => []) : [];
       const rawTeams = teamsRes && teamsRes.ok ? await teamsRes.json().catch(() => []) : [];
       const rawUsers = await usersRes.json();
 
-      state.categoriesMap.clear();
-
-      // Mapear grupos do fallback se existirem
-      if (Array.isArray(rawGroupsFallback)) {
-        rawGroupsFallback.forEach((g) => state.categoriesMap.set(String(g.id), g.name || g.id));
-      }
-
-      // Buscar grupos específicos de cada contest (padrão DOMjudge v4)
-      if (Array.isArray(rawContests)) {
-        for (const c of rawContests) {
-          const cId = c.id || c.cid;
-          const contestGroups = await fetch(`${creds.apiBase}/contests/${encodeURIComponent(cId)}/groups`, { headers })
-            .then((r) => (r.ok ? r.json() : []))
-            .catch(() => []);
-
-          if (Array.isArray(contestGroups)) {
-            contestGroups.forEach((g) => state.categoriesMap.set(String(g.id), g.name || g.id));
-          }
-        }
-      }
-
       state.teamsMap.clear();
       rawTeams.forEach((t) => {
-        // Resolver categoria através dos group_ids ou category_id
+        // Resolver categoria através dos dados de category do time
         let catName = "";
-        if (Array.isArray(t.group_ids) && t.group_ids.length > 0) {
-          catName = t.group_ids.map((gid) => state.categoriesMap.get(String(gid)) || gid).join(", ");
+        if (t.category && typeof t.category === "string" && t.category.trim()) {
+          catName = t.category.trim();
+        } else if (Array.isArray(t.group_ids) && t.group_ids.length > 0) {
+          catName = t.group_ids
+            .map((gid) => state.categoriesMap.get(String(gid)) || (String(gid).toLowerCase() === "participants" ? "Participants" : gid))
+            .join(", ");
         } else if (t.category_id) {
           catName = state.categoriesMap.get(String(t.category_id)) || String(t.category_id);
+        }
+
+        if (catName) {
+          const slug = catName.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-");
+          state.categoriesMap.set(slug, catName);
         }
 
         // Resolver labels (array ou string separada por vírgula no campo label)
@@ -250,71 +283,15 @@ const UsersModule = (() => {
           name: t.name,
           category: catName,
           labels,
+          raw: t,
         });
       });
-
-      // Verificar usuários com função "team" que não possuem time cadastrado e criar automaticamente
-      const teamUsersMissingTeam = rawUsers.filter((u) => {
-        const roles = Array.isArray(u.roles) ? u.roles : (u.roles ? [u.roles] : ["team"]);
-        return roles.includes("team") && !u.team_id && !u.team;
-      });
-
-      if (teamUsersMissingTeam.length > 0) {
-        try {
-          const teamsPayload = teamUsersMissingTeam.map((u) => ({
-            id: u.username || String(u.id),
-            name: u.name || u.username,
-            group_ids: ["participants"],
-            organization_id: "UFPE",
-            label: "",
-          }));
-
-          const fdTeams = new FormData();
-          fdTeams.append(
-            "json",
-            new Blob([JSON.stringify(teamsPayload)], { type: "application/json" }),
-            "teams.json"
-          );
-          await fetch(`${creds.apiBase}/users/teams`, { method: "POST", headers, body: fdTeams }).catch(() => null);
-
-          const accountsPayload = teamUsersMissingTeam.map((u) => ({
-            type: "team",
-            name: u.name || u.username,
-            username: u.username,
-            email: u.email || null,
-            team_id: u.username || String(u.id),
-            roles: Array.isArray(u.roles) ? u.roles : ["team"],
-          }));
-
-          const fdAccounts = new FormData();
-          fdAccounts.append(
-            "json",
-            new Blob([JSON.stringify(accountsPayload)], { type: "application/json" }),
-            "accounts.json"
-          );
-          await fetch(`${creds.apiBase}/users/accounts`, { method: "POST", headers, body: fdAccounts }).catch(() => null);
-
-          // Atualizar os objetos locais em memória
-          teamUsersMissingTeam.forEach((u) => {
-            const tId = u.username || String(u.id);
-            u.team_id = tId;
-            u.team = u.name || u.username;
-            state.teamsMap.set(String(tId), {
-              id: tId,
-              teamid: tId,
-              name: u.name || u.username,
-              category: "Participants",
-              labels: [],
-            });
-          });
-        } catch (autoTeamErr) {
-          console.warn("Aviso ao auto-cadastrar times:", autoTeamErr);
-        }
-      }
 
       state.originalUsersMap.clear();
       state.users = rawUsers.map((u) => {
         const teamObj = u.team_id ? state.teamsMap.get(String(u.team_id)) : null;
+        const rawLabels = teamObj ? teamObj.labels : [];
+        const cleanLabels = rawLabels.filter((l) => l.toLowerCase() !== (u.username || "").toLowerCase());
         const mappedUser = {
           id: String(u.id || u.username),
           username: u.username || "",
@@ -325,7 +302,7 @@ const UsersModule = (() => {
           hasTeam: Boolean(u.team_id),
           teamId: u.team_id || null,
           teamCategory: teamObj ? teamObj.category : "",
-          teamLabels: teamObj ? teamObj.labels : [],
+          teamLabels: cleanLabels,
           password: "",
         };
 
@@ -502,8 +479,12 @@ const UsersModule = (() => {
 
     state.users.forEach((u) => {
       if (u.teamCategory) categories.add(u.teamCategory);
-      (u.teamLabels || []).forEach((l) => labels.add(l));
+      getUserCustomLabels(u).forEach((l) => labels.add(l));
       (u.roles || []).forEach((r) => roles.add(r));
+    });
+
+    state.categoriesMap.forEach((gname) => {
+      if (gname) categories.add(gname);
     });
 
     if (els.filterCategory) {
@@ -531,6 +512,80 @@ const UsersModule = (() => {
   }
 
   // --------------------------------------------------------------------------
+  // CARREGAR CATEGORIAS DA API DO DOMJUDGE (EXCLUSIVAMENTE DE TEAMS)
+  // --------------------------------------------------------------------------
+  async function loadCategories() {
+    const creds = window.getApiCredentials ? window.getApiCredentials() : null;
+    if (!creds || !creds.apiBase) return;
+
+    const headers = {};
+    if (creds.user && creds.password) {
+      headers["Authorization"] = `Basic ${btoa(`${creds.user}:${creds.password}`)}`;
+    }
+
+    try {
+      state.categoriesMap.clear();
+
+      // Considerar APENAS os dados de categoria dos times (/teams)
+      const teams = await fetch(`${creds.apiBase}/teams`, { headers })
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []);
+
+      if (Array.isArray(teams)) {
+        teams.forEach((t) => {
+          // 1. Campo category do time (se houver)
+          if (t.category && typeof t.category === "string" && t.category.trim()) {
+            const cat = t.category.trim();
+            const slug = cat.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-");
+            state.categoriesMap.set(slug, cat);
+            state.categoriesMap.set(cat, cat);
+          }
+          // 2. Campo category_id do time (se houver)
+          if (t.category_id) {
+            const cid = String(t.category_id).trim();
+            if (cid && !state.categoriesMap.has(cid)) {
+              let disp = cid;
+              if (isParticipantsCategory(cid)) {
+                disp = cid.replace(/^participants[-_]?/i, "Participants-");
+                if (disp === "Participants-") disp = "Participants";
+              }
+              state.categoriesMap.set(cid, disp);
+            }
+          }
+          // 3. Campo group_ids do time
+          if (Array.isArray(t.group_ids)) {
+            t.group_ids.forEach((gid) => {
+              const strGid = String(gid).trim();
+              if (strGid && !state.categoriesMap.has(strGid)) {
+                let displayName = strGid;
+                if (strGid.toLowerCase() === "participants") {
+                  displayName = "Participants";
+                } else if (isParticipantsCategory(strGid)) {
+                  displayName = strGid.replace(/^participants[-_]?/i, "Participants-");
+                  if (displayName === "Participants-") displayName = "Participants";
+                } else if (strGid.toLowerCase() === "system") {
+                  displayName = "System";
+                }
+                state.categoriesMap.set(strGid, displayName);
+              }
+            });
+          }
+        });
+      }
+
+      // Se nenhum time tiver categoria ainda, manter Participants como base
+      if (state.categoriesMap.size === 0) {
+        state.categoriesMap.set("participants", "Participants");
+      }
+
+      loadStoredCustomCategories();
+      populateFilterDropdowns();
+    } catch (e) {
+      console.warn("Aviso ao carregar categorias de teams:", e.message);
+    }
+  }
+
+  // --------------------------------------------------------------------------
   // FILTRAGEM & TABELA
   // --------------------------------------------------------------------------
   function getFilteredUsers() {
@@ -544,12 +599,20 @@ const UsersModule = (() => {
         if (!uMatch && !nMatch && !eMatch) return false;
       }
 
-      if (state.filterCategory !== "all" && user.teamCategory !== state.filterCategory) {
-        return false;
+      if (state.filterCategory !== "all") {
+        const filterCat = state.filterCategory.toLowerCase();
+        const userCat = (user.teamCategory || "").toLowerCase();
+        const isMatch =
+          userCat === filterCat ||
+          (filterCat === "participants" && isParticipantsCategory(user.teamCategory)) ||
+          (isParticipantsCategory(filterCat) && userCat === filterCat);
+
+        if (!isMatch) return false;
       }
 
       if (state.filterLabel && state.filterLabel.trim() !== "" && state.filterLabel !== "all") {
-        if (!matchLabelsExpression(user.teamLabels, state.filterLabel)) {
+        const visibleLabels = getUserCustomLabels(user);
+        if (!matchLabelsExpression(visibleLabels, state.filterLabel)) {
           return false;
         }
       }
@@ -642,8 +705,9 @@ const UsersModule = (() => {
       const uId = String(user.id);
       const isSelected = state.selectedUserIds.has(uId);
 
-      const labelsHtml = (user.teamLabels && user.teamLabels.length > 0)
-        ? user.teamLabels.map((l) => `<span class="pill">${sanitize(l)}</span>`).join("")
+      const customLabels = getUserCustomLabels(user);
+      const labelsHtml = (customLabels && customLabels.length > 0)
+        ? customLabels.map((l) => `<span class="pill">${sanitize(l)}</span>`).join("")
         : '<span style="color: var(--ink-muted); font-size: 0.78rem;">-</span>';
 
       const rolesHtml = (user.roles && user.roles.length > 0)
@@ -716,15 +780,24 @@ const UsersModule = (() => {
     els.editPassword.value = "";
     els.editHasTeam.checked = Boolean(user.hasTeam);
     els.editCategory.value = user.teamCategory || "";
-    els.editLabels.value = (user.teamLabels || []).join(", ");
+    els.editLabels.value = getUserCustomLabels(user).join(", ");
     els.editEnabled.checked = Boolean(user.enabled);
 
+    const isOriginalAdmin = (user.roles || []).includes("admin") || user.username === "admin";
     document.querySelectorAll('input[name="editRoles"]').forEach((cb) => {
       cb.checked = (user.roles || []).includes(cb.value);
+      if (cb.value === "admin" && isOriginalAdmin) {
+        cb.checked = true;
+        cb.disabled = true;
+        cb.title = "O papel de admin é protegido e não pode ser removido.";
+      } else {
+        cb.disabled = false;
+        cb.title = "";
+      }
     });
 
-    els.editCategoryField.style.display = user.hasTeam ? "flex" : "none";
-    els.editLabelsField.style.display = user.hasTeam ? "flex" : "none";
+    els.editCategoryField.style.display = "flex";
+    els.editLabelsField.style.display = "flex";
 
     els.editModal.hidden = false;
   }
@@ -741,21 +814,50 @@ const UsersModule = (() => {
     if (els.editPassword.value.trim()) {
       user.password = els.editPassword.value.trim();
     }
-    user.hasTeam = els.editHasTeam.checked;
-    user.teamCategory = user.hasTeam ? els.editCategory.value.trim() : "";
-    user.teamLabels = user.hasTeam
-      ? els.editLabels.value.split(",").map((s) => s.trim()).filter(Boolean)
-      : [];
+
+    const newCategory = els.editCategory.value.trim();
+    if (newCategory) {
+      saveStoredCustomCategory(newCategory);
+    }
+    const newLabels = els.editLabels.value
+      .split(/[,;]+/)
+      .map((s) => s.trim())
+      .filter((s) => Boolean(s) && s.toLowerCase() !== user.username.toLowerCase());
+    const isPart = isParticipantsCategory(newCategory);
+    const wantsTeam = els.editHasTeam.checked || isPart || Boolean(newCategory) || newLabels.length > 0;
+
+    user.hasTeam = wantsTeam;
+    user.teamCategory = newCategory;
+    user.teamLabels = newLabels;
+    if (wantsTeam && !user.teamId) {
+      user.teamId = user.username;
+    }
+
     user.enabled = els.editEnabled.checked;
 
-    user.roles = Array.from(
+    const selectedRoles = Array.from(
       document.querySelectorAll('input[name="editRoles"]:checked')
     ).map((cb) => cb.value);
 
+    // Se for categoria de participante, garante role team
+    if (isPart && !selectedRoles.includes("team") && !selectedRoles.includes("admin")) {
+      selectedRoles.push("team");
+    }
+
+    // O papel de admin não pode ser removido ou trocado
+    const origUser = state.originalUsersMap.get(user.id);
+    const wasAdmin = (origUser?.roles || []).includes("admin") || (user.roles || []).includes("admin") || user.username === "admin";
+    if (wasAdmin && !selectedRoles.includes("admin")) {
+      selectedRoles.push("admin");
+    }
+
+    user.roles = selectedRoles.length > 0 ? selectedRoles : ["team"];
+
     els.editModal.hidden = true;
+    populateFilterDropdowns();
     renderTable();
     updateKpis();
-    showToast(`Usuário ${user.username} atualizado localmente.`, "success");
+    showToast(`Usuário ${user.username} atualizado localmente. Clique em "Salvar no DOMjudge" para sincronizar.`, "success");
   }
 
   // --------------------------------------------------------------------------
@@ -858,15 +960,27 @@ const UsersModule = (() => {
     const name = document.getElementById("createName").value.trim();
     const email = document.getElementById("createEmail").value.trim();
     const password = document.getElementById("createPassword").value.trim();
-    const hasTeam = els.createHasTeam.checked;
-    const teamCategory = hasTeam ? els.createCategory.value.trim() : "";
+    const hasTeamRaw = els.createHasTeam.checked;
+    const teamCategory = els.createCategory.value.trim();
+    if (teamCategory) {
+      saveStoredCustomCategory(teamCategory);
+    }
+    const isPart = isParticipantsCategory(teamCategory);
+    const hasTeam = hasTeamRaw || isPart || Boolean(teamCategory);
     const teamLabels = hasTeam
-      ? els.createLabels.value.split(",").map((s) => s.trim()).filter(Boolean)
+      ? els.createLabels.value
+          .split(/[,;]+/)
+          .map((s) => s.trim())
+          .filter((s) => Boolean(s) && s.toLowerCase() !== username.toLowerCase())
       : [];
     const enabled = document.getElementById("createEnabled").checked;
     const roles = Array.from(
       document.querySelectorAll('input[name="createRoles"]:checked')
     ).map((cb) => cb.value);
+
+    if (isPart && !roles.includes("team") && !roles.includes("admin")) {
+      roles.push("team");
+    }
 
     const newUser = {
       id: `new_${Date.now()}`,
@@ -900,6 +1014,9 @@ const UsersModule = (() => {
     const hasTeam = els.batchHasTeam.checked;
 
     parsed.forEach((p, idx) => {
+      const cleanLabels = (p.labels || []).filter(
+        (l) => l.toLowerCase() !== (p.username || "").toLowerCase()
+      );
       state.users.unshift({
         id: `batch_${Date.now()}_${idx}`,
         username: p.username,
@@ -908,10 +1025,13 @@ const UsersModule = (() => {
         password: p.password,
         hasTeam,
         teamCategory: p.category,
-        teamLabels: p.labels,
+        teamLabels: cleanLabels,
         enabled: true,
         roles: ["team"],
       });
+      if (p.category) {
+        saveStoredCustomCategory(p.category);
+      }
     });
 
     els.createModal.hidden = true;
@@ -932,16 +1052,23 @@ const UsersModule = (() => {
     if (scope === "selected") {
       targets = state.users.filter((u) => state.selectedUserIds.has(String(u.id)));
       if (targets.length === 0) {
-        showToast("Nenhum usuário selecionado. Marque os checkboxes ou altere o Escopo para 'Página atual' ou 'Todos filtrados'.", "warning");
+        showToast("Nenhum usuário selecionado na tabela.", "warning");
+        return;
+      }
+    } else if (scope === "filtered") {
+      targets = getFilteredUsers();
+      if (targets.length === 0) {
+        showToast("Nenhum usuário encontrado com os filtros atuais.", "warning");
         return;
       }
     } else if (scope === "page") {
       const filtered = getFilteredUsers();
-      const sorted = getSortedUsers(filtered);
-      const startIdx = (state.page - 1) * state.pageSize;
-      targets = sorted.slice(startIdx, startIdx + state.pageSize);
-    } else {
-      targets = getFilteredUsers();
+      const start = (state.page - 1) * state.pageSize;
+      targets = filtered.slice(start, start + state.pageSize);
+      if (targets.length === 0) {
+        showToast("Nenhum usuário na página atual.", "warning");
+        return;
+      }
     }
 
     if (targets.length === 0) {
@@ -949,12 +1076,16 @@ const UsersModule = (() => {
       return;
     }
 
-    const newCategory = els.bulkCategory?.value?.trim();
+    const newCategory = els.bulkCategory.value.trim();
+    if (newCategory) {
+      saveStoredCustomCategory(newCategory);
+    }
     const newLabelsRaw = (els.bulkLabels?.value || "").trim();
     const labelsMode = els.bulkLabelsMode?.value || "add";
     const newEnabled = els.bulkEnabled?.value || "keep";
 
     const isReplacing = labelsMode === "replace";
+    const isClearing = labelsMode === "clear";
     const hasLabelsInput = newLabelsRaw.length > 0;
     const inputLabels = hasLabelsInput
       ? newLabelsRaw.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)
@@ -963,22 +1094,31 @@ const UsersModule = (() => {
     targets.forEach((u) => {
       if (newCategory) {
         u.teamCategory = newCategory;
-        u.hasTeam = true;
-        if (!u.teamId) u.teamId = u.username;
+        if (isParticipantsCategory(newCategory)) {
+          u.hasTeam = true;
+          if (!u.teamId) u.teamId = u.username;
+          if (!u.roles.includes("team") && !u.roles.includes("admin")) {
+            u.roles.push("team");
+          }
+        }
       }
 
-      if (hasLabelsInput || isReplacing) {
+      if (hasLabelsInput || isReplacing || isClearing) {
         let nextLabels = [];
-        if (labelsMode === "add") {
-          const set = new Set(u.teamLabels || []);
-          inputLabels.forEach((l) => set.add(l));
+        const uCustom = getUserCustomLabels(u);
+        if (labelsMode === "clear") {
+          nextLabels = [];
+        } else if (labelsMode === "add") {
+          const set = new Set(uCustom);
+          inputLabels.forEach((l) => {
+            if (l.toLowerCase() !== u.username.toLowerCase()) set.add(l);
+          });
           nextLabels = Array.from(set);
         } else if (labelsMode === "replace") {
-          nextLabels = [...inputLabels];
+          nextLabels = inputLabels.filter((l) => l.toLowerCase() !== u.username.toLowerCase());
         } else if (labelsMode === "remove") {
-          const set = new Set(u.teamLabels || []);
-          inputLabels.forEach((l) => set.delete(l));
-          nextLabels = Array.from(set);
+          const removeSet = new Set(inputLabels.map((l) => l.toLowerCase()));
+          nextLabels = uCustom.filter((l) => !removeSet.has(l.toLowerCase()));
         }
         u.teamLabels = nextLabels;
         u.hasTeam = true;
@@ -1026,82 +1166,166 @@ const UsersModule = (() => {
         authHeaders["Authorization"] = `Basic ${btoa(`${creds.user}:${creds.password}`)}`;
       }
 
-      // 1. Criar times genuinamente novos (que ainda não existiam no DOMjudge)
-      const newTeamsToCreate = [];
-      changedUsers.forEach((u) => {
-        if (u.hasTeam || u.teamId || u.teamCategory || (u.teamLabels && u.teamLabels.length > 0)) {
-          const tId = u.teamId || u.username;
-          if (!state.teamsMap.has(String(tId))) {
-            let groupIds = [];
-            if (u.teamCategory) {
-              // Buscar ID da categoria/grupo pelo nome ou slug
-              let foundGid = null;
-              for (const [gid, gname] of state.categoriesMap.entries()) {
-                if (
-                  gname.toLowerCase() === u.teamCategory.toLowerCase() ||
-                  gid.toLowerCase() === u.teamCategory.toLowerCase()
-                ) {
-                  foundGid = gid;
-                  break;
-                }
-              }
-              groupIds = [foundGid || u.teamCategory.toLowerCase().replace(/[^a-z0-9_-]/g, "") || "participants"];
-            } else {
-              groupIds = ["participants"];
-            }
+      function appendJsonToFormData(formData, fieldName, filename, data) {
+        const jsonStr = typeof data === "string" ? data : JSON.stringify(data);
+        try {
+          const file = new File([jsonStr], filename, { type: "application/json" });
+          formData.append(fieldName, file, filename);
+        } catch (e) {
+          const blob = new Blob([jsonStr], { type: "application/json" });
+          formData.append(fieldName, blob, filename);
+        }
+      }
 
-            newTeamsToCreate.push({
-              id: tId,
-              name: u.name || u.username,
-              group_ids: groupIds,
-              label: Array.isArray(u.teamLabels) ? u.teamLabels.join(", ") : (u.teamLabels || ""),
+      // 1. Sincronizar novos grupos / subcategorias com DOMjudge antes dos times
+      const groupsToSync = [];
+      changedUsers.forEach((u) => {
+        if (u.teamCategory && u.teamCategory.toLowerCase() !== "participants") {
+          const slug = u.teamCategory.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-");
+          if (!groupsToSync.some((g) => g.id === slug)) {
+            groupsToSync.push({
+              id: slug,
+              name: u.teamCategory,
             });
           }
         }
       });
 
-      if (newTeamsToCreate.length > 0) {
+      if (groupsToSync.length > 0) {
         try {
-          const fdTeams = new FormData();
-          fdTeams.append(
-            "json",
-            new Blob([JSON.stringify(newTeamsToCreate)], { type: "application/json" }),
-            "teams.json"
-          );
-          const resTeams = await fetch(`${creds.apiBase}/users/teams`, {
+          const fdGroups = new FormData();
+          appendJsonToFormData(fdGroups, "json", "groups.json", groupsToSync);
+          await fetch(`${creds.apiBase}/users/groups`, {
             method: "POST",
             headers: authHeaders,
-            body: fdTeams,
+            body: fdGroups,
           });
-          if (!resTeams.ok) {
-            console.warn("Aviso ao criar novos times via API:", await resTeams.text().catch(() => ""));
-          }
+          groupsToSync.forEach((g) => {
+            state.categoriesMap.set(g.id, g.name);
+          });
         } catch (e) {
-          console.warn("Erro ao enviar teams.json:", e);
+          console.warn("Aviso ao sincronizar grupos com DOMjudge:", e);
+        }
+      }
+
+      // 2. Criar e atualizar times no DOMjudge (teams.json)
+      const teamsToSync = [];
+      changedUsers.forEach((u) => {
+        const existingObj = u.team_id ? state.teamsMap.get(String(u.team_id)) : (u.teamId ? state.teamsMap.get(String(u.teamId)) : null);
+        const hasExistingTeam = Boolean(existingObj);
+        const customLabels = getUserCustomLabels(u);
+        const wantsTeam = u.hasTeam || Boolean(u.teamCategory) || customLabels.length > 0;
+
+        if (wantsTeam || hasExistingTeam) {
+          const tId = existingObj ? existingObj.id : (u.teamId || u.username);
+          const tName = existingObj ? (existingObj.name || u.name || u.username) : (u.name || u.username);
+
+          let groupIds = [];
+          if (u.teamCategory) {
+            let foundGid = null;
+            // 1. Match exato no categoriesMap (por nome ou id)
+            for (const [gid, gname] of state.categoriesMap.entries()) {
+              if (
+                gname.toLowerCase() === u.teamCategory.toLowerCase() ||
+                gid.toLowerCase() === u.teamCategory.toLowerCase()
+              ) {
+                foundGid = gid;
+                break;
+              }
+            }
+
+            // 2. Se for subcategoria, preserva o slug da subcategoria e registra no mapa
+            if (!foundGid) {
+              const slug = u.teamCategory.toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-");
+              foundGid = slug;
+              state.categoriesMap.set(slug, u.teamCategory);
+            }
+
+            groupIds = [foundGid];
+          } else if (existingObj?.raw?.group_ids && existingObj.raw.group_ids.length > 0) {
+            groupIds = existingObj.raw.group_ids;
+          } else {
+            groupIds = ["participants"];
+          }
+
+          // Sempre inclui o username como label para garantir unicidade no banco do DOMjudge
+          const allLabels = [u.username, ...customLabels].filter(Boolean);
+          const labelStr = allLabels.join(", ");
+
+          const teamPayload = {
+            id: tId,
+            name: tName,
+            group_ids: groupIds,
+            label: labelStr,
+          };
+
+          if (existingObj?.raw?.organization_id) {
+            teamPayload.organization_id = existingObj.raw.organization_id;
+          }
+
+          teamsToSync.push(teamPayload);
+        }
+      });
+
+      if (teamsToSync.length > 0) {
+        // Tenta enviar em lote primeiro
+        const fdTeams = new FormData();
+        appendJsonToFormData(fdTeams, "json", "teams.json", teamsToSync);
+        const resTeams = await fetch(`${creds.apiBase}/users/teams`, {
+          method: "POST",
+          headers: authHeaders,
+          body: fdTeams,
+        });
+
+        if (!resTeams.ok && teamsToSync.length > 1) {
+          console.warn("Envio em lote de teams.json retornou status", resTeams.status, "- sincronizando individualmente com resiliência...");
+          // Fallback individual para garantir que todos os times possíveis sejam atualizados
+          for (const item of teamsToSync) {
+            try {
+              const singleFd = new FormData();
+              appendJsonToFormData(singleFd, "json", "teams.json", [item]);
+              await fetch(`${creds.apiBase}/users/teams`, {
+                method: "POST",
+                headers: authHeaders,
+                body: singleFd,
+              });
+              await new Promise((r) => setTimeout(r, 60));
+            } catch (e) {
+              console.warn(`Aviso ao sincronizar time ${item.id}:`, e);
+            }
+          }
         }
       }
 
       // 2. Sincronizar Contas/Usuários via /users/accounts
-      const accountsToSync = changedUsers.map((u) => ({
-        type: (u.roles && u.roles.includes("admin"))
-          ? "admin"
-          : (u.roles && u.roles.includes("jury") ? "jury" : "team"),
-        name: u.name,
-        username: u.username,
-        email: u.email || null,
-        team_id: (u.hasTeam || u.teamCategory || (u.teamLabels && u.teamLabels.length > 0))
-          ? (u.teamId || u.username)
-          : null,
-        roles: u.roles && u.roles.length > 0 ? u.roles : ["team"],
-        password: u.password || undefined,
-      }));
+      const accountsToSync = changedUsers.map((u) => {
+        const origUser = state.originalUsersMap.get(u.id);
+        const wasAdmin = (origUser?.roles || []).includes("admin") || (u.roles || []).includes("admin") || u.username === "admin";
+
+        let roles = Array.isArray(u.roles) && u.roles.length > 0 ? [...u.roles] : ["team"];
+        if (wasAdmin && !roles.includes("admin")) {
+          roles.push("admin");
+        }
+
+        const isAdmin = roles.includes("admin");
+        const isJury = roles.includes("jury");
+        const type = isAdmin ? "admin" : (isJury ? "jury" : "team");
+
+        return {
+          type,
+          name: u.name,
+          username: u.username,
+          email: u.email || null,
+          team_id: (u.hasTeam || u.teamCategory || (u.teamLabels && u.teamLabels.length > 0))
+            ? (u.teamId || u.team_id || u.username)
+            : null,
+          roles,
+          password: u.password || undefined,
+        };
+      });
 
       const fdAccounts = new FormData();
-      fdAccounts.append(
-        "json",
-        new Blob([JSON.stringify(accountsToSync)], { type: "application/json" }),
-        "accounts.json"
-      );
+      appendJsonToFormData(fdAccounts, "json", "accounts.json", accountsToSync);
 
       const resAccounts = await fetch(`${creds.apiBase}/users/accounts`, {
         method: "POST",
@@ -1111,15 +1335,27 @@ const UsersModule = (() => {
 
       if (!resAccounts.ok) {
         const errTxt = await resAccounts.text().catch(() => "");
-        throw new Error(`Erro na API (${resAccounts.status}): ${errTxt}`);
+        throw new Error(`Erro ao sincronizar usuários na API (HTTP ${resAccounts.status}): ${errTxt || resAccounts.statusText}`);
       }
 
-      // Atualizar mapeamento original de usuários
+      // Atualizar mapeamento original de usuários e times
       changedUsers.forEach((user) => {
         if ((user.hasTeam || user.teamCategory || (user.teamLabels && user.teamLabels.length > 0)) && !user.teamId) {
           user.teamId = user.username;
           user.hasTeam = true;
         }
+        if (user.teamId) {
+          const customLabels = getUserCustomLabels(user);
+          const allLabels = [user.username, ...customLabels].filter(Boolean);
+          state.teamsMap.set(String(user.teamId), {
+            id: user.teamId,
+            teamid: user.teamId,
+            name: user.name || user.username,
+            category: user.teamCategory || "Participants",
+            labels: allLabels,
+          });
+        }
+        user.teamLabels = getUserCustomLabels(user);
         state.originalUsersMap.set(user.id, JSON.parse(JSON.stringify(user)));
       });
 
@@ -1128,7 +1364,10 @@ const UsersModule = (() => {
       showToast(`${changedUsers.length} usuário(s) sincronizados com sucesso no DOMjudge!`, "success");
     } catch (err) {
       console.error("Erro ao salvar alterações de usuários:", err);
-      showToast(`Falha ao salvar: ${err.message}`, "error");
+      if (err.message && (err.message.includes("401") || err.message.includes("403"))) {
+        if (window.handleApiUnauthorized) window.handleApiUnauthorized(err);
+      }
+      showToast(`Erro ao salvar alterações: ${err.message}`, "error", 10000);
     } finally {
       els.saveChangesBtn.disabled = state.users.filter(isUserChanged).length === 0;
     }
@@ -1145,7 +1384,7 @@ const UsersModule = (() => {
 
     let csv = "id,username,name,email,category,labels,roles,enabled\n";
     state.users.forEach((u) => {
-      const labelsStr = (u.teamLabels || []).join(";");
+      const labelsStr = getUserCustomLabels(u).join(";");
       const rolesStr = (u.roles || []).join(";");
       csv += `"${u.id}","${u.username}","${u.name}","${u.email || ""}","${u.teamCategory || ""}","${labelsStr}","${rolesStr}","${u.enabled ? 1 : 0}"\n`;
     });
@@ -1168,6 +1407,19 @@ const UsersModule = (() => {
     if (els.saveChangesBtn) els.saveChangesBtn.addEventListener("click", saveChanges);
     if (els.exportUsersCsvBtn) els.exportUsersCsvBtn.addEventListener("click", exportCsv);
     if (els.applyBulkBtn) els.applyBulkBtn.addEventListener("click", applyBulkAction);
+
+    if (els.bulkLabelsMode && els.bulkLabels) {
+      els.bulkLabelsMode.addEventListener("change", () => {
+        if (els.bulkLabelsMode.value === "clear") {
+          els.bulkLabels.disabled = true;
+          els.bulkLabels.value = "";
+          els.bulkLabels.placeholder = "Desativado (modo Limpar)";
+        } else {
+          els.bulkLabels.disabled = false;
+          els.bulkLabels.placeholder = "ex: turma-a";
+        }
+      });
+    }
 
     // Filtros
     if (els.filterText) {
@@ -1369,10 +1621,14 @@ const UsersModule = (() => {
         renderTable();
       });
     });
+
+    loadCategories();
   }
 
-  return { init, loadUsers, loadDemoUsers, renderTable };
+  return { init, loadUsers, loadCategories, loadDemoUsers, renderTable };
 })();
+
+window.UsersModule = UsersModule;
 
 document.addEventListener("DOMContentLoaded", () => {
   UsersModule.init();

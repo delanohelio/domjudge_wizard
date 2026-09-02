@@ -1084,6 +1084,15 @@ kbd {
   font-size: 0.88em;
 }
 
+.rendered-markdown td code,
+.rendered-markdown th code {
+  display: inline-block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+  text-align: left;
+}
+
 .rendered-markdown pre {
   background: #0d1117;
   padding: 14px;

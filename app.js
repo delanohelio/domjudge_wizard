@@ -223,6 +223,9 @@ function switchTab(tabId, pushHash = true) {
   if (tabId === "contests" && window.ContestManagerModule) {
     window.ContestManagerModule.loadContests();
   } else if (tabId === "users" && window.UsersModule) {
+    if (window.UsersModule.loadCategories) {
+      window.UsersModule.loadCategories();
+    }
     window.UsersModule.loadUsers();
   } else if (tabId === "review" && globalState.contests.length === 0) {
     loadReviewDataFromApi();

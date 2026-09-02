@@ -5,10 +5,10 @@
 const CreatorModule = (() => {
   const els = {
     creatorName: document.getElementById("creatorName"),
-    creatorShortname: document.getElementById("creatorShortname"),
+    creatorProblemId: document.getElementById("creatorProblemId"),
+    creatorIsEditCheckbox: document.getElementById("creatorIsEditCheckbox"),
     creatorTime: document.getElementById("creatorTime"),
     creatorMemory: document.getElementById("creatorMemory"),
-    creatorProblemId: document.getElementById("creatorProblemId"),
     creatorMarkdown: document.getElementById("creatorMarkdown"),
     markdownPreview: document.getElementById("markdownPreview"),
     mdWorkspace: document.getElementById("mdWorkspace"),
@@ -93,6 +93,15 @@ const CreatorModule = (() => {
         rendered = sanitize(display ? `$$${tex}$$` : `$${tex}$`);
       }
       html = html.replace(id, rendered);
+    });
+
+    // Permitir e interpretar tags HTML úteis dentro de tags <code>...</code>
+    // (ex.: `4<br>1 2 3 4` em células de tabela de exemplos, formatações em código)
+    html = html.replace(/<code\b([^>]*)>([\s\S]*?)<\/code>/gi, (match, attrs, codeContent) => {
+      const decoded = codeContent
+        .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
+        .replace(/&lt;(\/?(?:b|i|strong|em|u|s|del|span|sub|sup|small|mark|kbd|var)(?:\s+[^&>]*)?)&gt;/gi, "<$1>");
+      return `<code${attrs}>${decoded}</code>`;
     });
 
     return html;
@@ -355,8 +364,342 @@ Explicações adicionais sobre os casos de teste de exemplo.
   // --------------------------------------------------------------------------
   // GERAÇÃO DE PDF E PACOTE ZIP
   // --------------------------------------------------------------------------
+  function getPdfDocumentStyles() {
+    return `
+      <style>
+        .pdf-render-root {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+          color: #1e293b !important;
+          background: #ffffff !important;
+          padding: 20px 24px !important;
+          box-sizing: border-box !important;
+          width: 760px !important;
+          line-height: 1.7 !important;
+          font-size: 14px !important;
+          letter-spacing: normal !important;
+        }
+
+        .pdf-header {
+          margin-bottom: 20px !important;
+          padding-bottom: 12px !important;
+          border-bottom: 2px solid #e2e8f0 !important;
+        }
+
+        .pdf-title {
+          margin: 0 0 8px 0 !important;
+          font-size: 22px !important;
+          font-weight: 700 !important;
+          color: #0f172a !important;
+          line-height: 1.25 !important;
+        }
+
+        .pdf-meta {
+          font-size: 12.5px !important;
+          color: #64748b !important;
+          display: flex !important;
+          gap: 20px !important;
+        }
+
+        .pdf-meta strong {
+          color: #1e293b !important;
+        }
+
+        /* Títulos com espaçamento idêntico ao HTML */
+        .pdf-render-root h1 {
+          font-size: 22px !important;
+          font-weight: 700 !important;
+          color: #0f172a !important;
+          margin-top: 24px !important;
+          margin-bottom: 14px !important;
+          padding-bottom: 8px !important;
+          border-bottom: 2px solid #e2e8f0 !important;
+          line-height: 1.3 !important;
+          page-break-after: avoid !important;
+        }
+        .pdf-render-root h1:first-child {
+          margin-top: 0 !important;
+        }
+
+        .pdf-render-root h2 {
+          font-size: 17px !important;
+          font-weight: 700 !important;
+          color: #0f172a !important;
+          margin-top: 22px !important;
+          margin-bottom: 10px !important;
+          line-height: 1.35 !important;
+          page-break-after: avoid !important;
+        }
+
+        .pdf-render-root h3 {
+          font-size: 15px !important;
+          font-weight: 600 !important;
+          color: #1e293b !important;
+          margin-top: 18px !important;
+          margin-bottom: 8px !important;
+          line-height: 1.4 !important;
+          page-break-after: avoid !important;
+        }
+
+        .pdf-render-root h4 {
+          font-size: 14px !important;
+          font-weight: 600 !important;
+          color: #334155 !important;
+          margin-top: 14px !important;
+          margin-bottom: 6px !important;
+          page-break-after: avoid !important;
+        }
+
+        /* Parágrafos e espaçamento entre elementos de texto */
+        .pdf-render-root p {
+          margin-top: 0 !important;
+          margin-bottom: 14px !important;
+          line-height: 1.7 !important;
+          color: #1e293b !important;
+        }
+
+        /* Listas */
+        .pdf-render-root ul,
+        .pdf-render-root ol {
+          margin-top: 0 !important;
+          margin-bottom: 14px !important;
+          padding-left: 26px !important;
+          line-height: 1.7 !important;
+        }
+
+        .pdf-render-root li {
+          margin-bottom: 6px !important;
+          color: #1e293b !important;
+        }
+
+        /* Código em formato de texto estruturado */
+        .pdf-render-root pre {
+          background-color: #f8fafc !important;
+          border: 1px solid #e2e8f0 !important;
+          border-radius: 6px !important;
+          padding: 12px 16px !important;
+          margin-top: 12px !important;
+          margin-bottom: 16px !important;
+          overflow: hidden !important;
+          page-break-inside: avoid !important;
+          white-space: pre-wrap !important;
+          word-break: break-word !important;
+          word-wrap: break-word !important;
+          font-family: 'JetBrains Mono', 'Fira Code', 'Roboto Mono', Menlo, Monaco, Consolas, 'Courier New', monospace !important;
+          font-size: 12.5px !important;
+          line-height: 1.55 !important;
+          color: #0f172a !important;
+        }
+
+        .pdf-render-root pre code {
+          background: transparent !important;
+          padding: 0 !important;
+          border: none !important;
+          font-family: inherit !important;
+          font-size: inherit !important;
+          line-height: inherit !important;
+          color: inherit !important;
+          white-space: pre-wrap !important;
+          word-break: break-word !important;
+        }
+
+        .pdf-render-root :not(pre) > code {
+          font-family: 'JetBrains Mono', 'Fira Code', 'Roboto Mono', Menlo, Monaco, Consolas, 'Courier New', monospace !important;
+          background-color: #f1f5f9 !important;
+          color: #0f172a !important;
+          padding: 2px 6px !important;
+          border-radius: 4px !important;
+          border: 1px solid #e2e8f0 !important;
+          font-size: 0.88em !important;
+        }
+
+        .pdf-render-root td code,
+        .pdf-render-root th code {
+          display: inline-block !important;
+          white-space: pre-wrap !important;
+          word-break: break-word !important;
+          line-height: 1.45 !important;
+          text-align: left !important;
+        }
+
+        /* Tabelas com espaçamento nítido */
+        .pdf-render-root table {
+          width: 100% !important;
+          border-collapse: collapse !important;
+          margin-top: 14px !important;
+          margin-bottom: 18px !important;
+          page-break-inside: avoid !important;
+          font-size: 13px !important;
+          line-height: 1.5 !important;
+        }
+
+        .pdf-render-root th,
+        .pdf-render-root td {
+          border: 1px solid #cbd5e1 !important;
+          padding: 9px 13px !important;
+          text-align: left !important;
+          vertical-align: top !important;
+        }
+
+        .pdf-render-root th {
+          background-color: #f1f5f9 !important;
+          font-weight: 700 !important;
+          color: #0f172a !important;
+        }
+
+        .pdf-render-root td {
+          color: #1e293b !important;
+          background-color: #ffffff !important;
+        }
+
+        /* Citações / Blockquotes */
+        .pdf-render-root blockquote {
+          margin: 14px 0 18px 0 !important;
+          padding: 10px 16px !important;
+          border-left: 4px solid #3b82f6 !important;
+          background-color: #f8fafc !important;
+          color: #334155 !important;
+          font-style: italic !important;
+          page-break-inside: avoid !important;
+        }
+
+        .pdf-render-root hr {
+          border: none !important;
+          border-top: 1px solid #e2e8f0 !important;
+          margin: 20px 0 !important;
+        }
+
+        /* Tabela de Exemplos de Entrada e Saída */
+        .pdf-samples-section {
+          margin-top: 22px !important;
+          page-break-inside: avoid !important;
+        }
+        .pdf-samples-table {
+          width: 100% !important;
+          border-collapse: collapse !important;
+          margin-top: 8px !important;
+          margin-bottom: 16px !important;
+        }
+        .pdf-samples-table th {
+          background: #f1f5f9 !important;
+          border: 1px solid #cbd5e1 !important;
+          padding: 8px 12px !important;
+          font-weight: 700 !important;
+          text-align: left !important;
+          font-size: 13px !important;
+        }
+        .pdf-samples-table td {
+          border: 1px solid #cbd5e1 !important;
+          padding: 8px 12px !important;
+          vertical-align: top !important;
+          background: #ffffff !important;
+          width: 50% !important;
+        }
+        .pdf-samples-table pre {
+          margin: 0 !important;
+          background: transparent !important;
+          padding: 0 !important;
+          border: none !important;
+          font-family: 'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, monospace !important;
+          font-size: 12.5px !important;
+          line-height: 1.45 !important;
+          white-space: pre-wrap !important;
+          word-break: break-word !important;
+          color: #0f172a !important;
+        }
+
+        /* Syntax Highlighting Light */
+        .pdf-render-root .hljs-keyword,
+        .pdf-render-root .hljs-selector-tag,
+        .pdf-render-root .hljs-built_in {
+          color: #0550ae !important;
+          font-weight: 600 !important;
+        }
+        .pdf-render-root .hljs-string,
+        .pdf-render-root .hljs-title,
+        .pdf-render-root .hljs-section,
+        .pdf-render-root .hljs-attribute {
+          color: #0a3069 !important;
+        }
+        .pdf-render-root .hljs-number,
+        .pdf-render-root .hljs-literal {
+          color: #116329 !important;
+        }
+        .pdf-render-root .hljs-comment,
+        .pdf-render-root .hljs-quote {
+          color: #6e7781 !important;
+          font-style: italic !important;
+        }
+        .pdf-render-root .hljs-type,
+        .pdf-render-root .hljs-class {
+          color: #953800 !important;
+        }
+      </style>
+    `;
+  }
+
+  function buildPdfTemplateHtml(markdownText) {
+    const rawName = els.creatorName?.value?.trim() || "";
+    const timeLimit = parseFloat(els.creatorTime?.value) || 1.0;
+    const memoryLimit = parseInt(els.creatorMemory?.value, 10) || 512;
+    const parsedBody = parseMdWithMath(markdownText || "");
+
+    let sampleHtml = "";
+    const { samples } = collectTestsData();
+    const hasSampleInText = /exemplo|sample/i.test(markdownText || "");
+    if (samples.length > 0 && !hasSampleInText) {
+      sampleHtml = `
+        <div class="pdf-samples-section">
+          <h2>Exemplos de Entrada e Saída</h2>
+          <table class="pdf-samples-table">
+            <thead>
+              <tr>
+                <th style="width: 50%;">Exemplo de Entrada</th>
+                <th style="width: 50%;">Exemplo de Saída</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${samples
+                .map(
+                  (s) => `
+                <tr>
+                  <td><pre><code>${sanitize(s.in)}</code></pre></td>
+                  <td><pre><code>${sanitize(s.out)}</code></pre></td>
+                </tr>
+              `
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    const startsWithHeading = /^#\s+/m.test((markdownText || "").trim());
+    let headerHtml = "";
+    if (!startsWithHeading && rawName) {
+      headerHtml = `
+        <div class="pdf-header">
+          <h1 class="pdf-title">${sanitize(rawName)}</h1>
+          <div class="pdf-meta">
+            <span>Tempo Limite: <strong>${timeLimit}s</strong></span>
+            <span>Memória Limite: <strong>${memoryLimit} MB</strong></span>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      ${headerHtml}
+      <div class="pdf-content">
+        ${parsedBody}
+      </div>
+      ${sampleHtml}
+    `;
+  }
+
   function buildProblemHtml(markdownText) {
-    const body = parseMdWithMath(markdownText);
+    const content = buildPdfTemplateHtml(markdownText);
+    const styles = getPdfDocumentStyles();
     return `<!doctype html>
 <html>
 <head>
@@ -364,40 +707,64 @@ Explicações adicionais sobre os casos de teste de exemplo.
   <title>${sanitize(els.creatorName?.value || "Problema")}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css" />
-  <style>
-    body { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; padding: 24px; color: #111827; }
-    h1 { font-size: 24px; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px; margin-bottom: 16px; }
-    h2 { font-size: 18px; margin-top: 20px; margin-bottom: 8px; color: #1f2937; }
-    pre { background: #f3f4f6; padding: 12px; border-radius: 6px; overflow-x: auto; }
-    code { font-family: monospace; font-size: 14px; }
-    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
-    th, td { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; }
-    th { background: #f9fafb; font-weight: bold; }
-  </style>
+  ${styles}
 </head>
-<body>
-  ${body}
+<body style="margin: 0; background: #ffffff; display: flex; justify-content: center; padding: 20px;">
+  <div class="pdf-render-root" style="width: 100%; max-width: 800px;">
+    ${content}
+  </div>
 </body>
 </html>`;
   }
 
   async function generatePdfBlob() {
-    if (!window.html2pdf) {
-      throw new Error("Biblioteca html2pdf não carregada.");
+    const markdown = els.creatorMarkdown?.value || "";
+    const title = els.creatorName?.value?.trim() || "Problema";
+    const fullHtml = buildProblemHtml(markdown);
+
+    // 1. Priorizar geração via backend Node.js com Puppeteer (alta fidelidade e texto vetorial nativo)
+    try {
+      const response = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: fullHtml, title }),
+      });
+
+      if (response.ok) {
+        return await response.blob();
+      }
+      console.warn("Backend /api/pdf retornou HTTP", response.status, "- utilizando fallback local...");
+    } catch (netErr) {
+      console.warn("Backend /api/pdf indisponível, utilizando fallback local:", netErr.message);
     }
+
+    // 2. Fallback gracioso com html2pdf.js local no cliente
+    if (!window.html2pdf) {
+      throw new Error("Não foi possível gerar o PDF: backend indisponível e biblioteca html2pdf não carregada.");
+    }
+
     const container = document.createElement("div");
-    container.style.padding = "24px";
-    container.style.background = "#fff";
-    container.style.color = "#000";
-    container.style.fontFamily = "Arial, sans-serif";
-    container.innerHTML = parseMdWithMath(els.creatorMarkdown?.value || "");
+    container.className = "pdf-render-root";
+    container.innerHTML = `
+      ${getPdfDocumentStyles()}
+      ${buildPdfTemplateHtml(markdown)}
+    `;
+
+    highlightCodeBlocks(container);
 
     const opt = {
-      margin: 15,
-      filename: "problem.pdf",
+      margin: [12, 14, 12, 14], // [top, right, bottom, left] em mm
+      filename: `${slugify(title)}.pdf`,
       image: { type: "jpeg", quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        letterRendering: true,
+        backgroundColor: "#ffffff",
+      },
       jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+      pagebreak: { mode: ["avoid-all", "css", "legacy"] },
     };
 
     return await window.html2pdf().set(opt).from(container).outputPdf("blob");
@@ -410,7 +777,8 @@ Explicações adicionais sobre os casos de teste de exemplo.
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${slugify(els.creatorName?.value || "problem")}.pdf`;
+      const problemId = els.creatorProblemId?.value?.trim();
+      a.download = `${problemId || slugify(els.creatorName?.value || "problem")}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
       showToast("PDF baixado com sucesso!", "success");
@@ -447,7 +815,8 @@ Explicações adicionais sobre os casos de teste de exemplo.
     }
     const zip = new window.JSZip();
     const name = els.creatorName?.value?.trim() || "Problema";
-    const shortname = els.creatorShortname?.value?.trim() || slugify(name);
+    const problemId = els.creatorProblemId?.value?.trim();
+    const shortname = problemId || slugify(name);
     const timeLimit = parseFloat(els.creatorTime?.value) || 1.0;
     const memoryLimit = parseInt(els.creatorMemory?.value, 10) || 512;
     const markdown = els.creatorMarkdown?.value || "";
@@ -456,8 +825,8 @@ Explicações adicionais sobre os casos de teste de exemplo.
     const problemYaml = `name: "${name}"\nlimits:\n  time: ${timeLimit}\n  memory: ${memoryLimit}\n`;
     zip.file("problem.yaml", problemYaml);
 
-    // domjudge-problem.ini
-    const ini = `short-name = ${shortname}\nname = "${name}"\ntimelimit = ${timeLimit}\n`;
+    // domjudge-problem.ini: short-name deve ser o mesmo de name
+    const ini = `short-name = "${name}"\nname = "${name}"\ntimelimit = ${timeLimit}\n`;
     zip.file("domjudge-problem.ini", ini);
 
     // problem.pdf / problem.html
@@ -498,7 +867,8 @@ Explicações adicionais sobre os casos de teste de exemplo.
     try {
       showToast("Empacotando problema em formato DOMjudge...", "info");
       const zipBlob = await generateZipBlob();
-      const filename = `${slugify(els.creatorName?.value || "problem")}.zip`;
+      const problemId = els.creatorProblemId?.value?.trim();
+      const filename = `${problemId || slugify(els.creatorName?.value || "problem")}.zip`;
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement("a");
       a.href = url;
@@ -521,35 +891,80 @@ Explicações adicionais sobre os casos de teste de exemplo.
       const zip = await window.JSZip.loadAsync(file);
       clearAllTests();
 
-      // Ler statement.md ou problem.html
-      const mdFile = zip.file("statement.md") || zip.file("problem.md");
-      if (mdFile) {
-        const content = await mdFile.async("string");
-        if (els.creatorMarkdown) {
-          els.creatorMarkdown.value = content;
-          renderPreview();
+      const zipFiles = Object.keys(zip.files);
+
+      // 1. Ler statement em .md, .html ou .txt (mesmo em subpastas)
+      let statementText = "";
+      const mdPath =
+        zipFiles.find((p) => /(^|\/)(statement|problem|enunciado|description)(\.[a-z_-]+)?\.md$/i.test(p)) ||
+        zipFiles.find((p) => /\.md$/i.test(p) && !p.toLowerCase().includes("readme"));
+
+      if (mdPath) {
+        statementText = await zip.file(mdPath).async("string");
+      } else {
+        const htmlPath =
+          zipFiles.find((p) => /(^|\/)(statement|problem|enunciado|description)(\.[a-z_-]+)?\.html$/i.test(p)) ||
+          zipFiles.find((p) => /\.html$/i.test(p) && !p.toLowerCase().includes("index"));
+
+        if (htmlPath) {
+          const htmlContent = await zip.file(htmlPath).async("string");
+          const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+          statementText = bodyMatch ? bodyMatch[1].trim() : htmlContent.trim();
+        } else {
+          const txtPath = zipFiles.find((p) => /(^|\/)(statement|problem|enunciado|description)\.txt$/i.test(p));
+          if (txtPath) {
+            statementText = await zip.file(txtPath).async("string");
+          }
         }
       }
 
-      // Ler domjudge-problem.ini
-      const iniFile = zip.file("domjudge-problem.ini");
-      if (iniFile) {
-        const iniText = await iniFile.async("string");
+      if (statementText && els.creatorMarkdown) {
+        els.creatorMarkdown.value = statementText;
+        renderPreview();
+      }
+
+      // 2. Ler domjudge-problem.ini
+      const iniPath = zipFiles.find((p) => /(^|\/)domjudge-problem\.ini$/i.test(p));
+      if (iniPath) {
+        const iniText = await zip.file(iniPath).async("string");
         const nameMatch = iniText.match(/name\s*=\s*"?([^"\n\r]+)"?/i);
         const shortMatch = iniText.match(/short-name\s*=\s*"?([^"\n\r]+)"?/i);
         const timeMatch = iniText.match(/timelimit\s*=\s*([0-9.]+)/i);
 
-        if (nameMatch && els.creatorName) els.creatorName.value = nameMatch[1].trim();
-        if (shortMatch && els.creatorShortname) els.creatorShortname.value = shortMatch[1].trim();
+        const shortVal = shortMatch ? shortMatch[1].trim() : "";
+        const nameVal = nameMatch ? nameMatch[1].trim() : "";
+        const zipBase = file.name ? file.name.replace(/\.zip$/i, "").trim() : "";
+
+        if (nameVal && els.creatorName) els.creatorName.value = nameVal;
+        if (els.creatorProblemId) {
+          if (zipBase) {
+            els.creatorProblemId.value = zipBase;
+          } else if (shortVal && shortVal !== nameVal) {
+            els.creatorProblemId.value = shortVal;
+          } else if (nameVal) {
+            els.creatorProblemId.value = slugify(nameVal);
+          }
+        }
         if (timeMatch && els.creatorTime) els.creatorTime.value = timeMatch[1].trim();
       }
 
-      // Ler testes sample e secret
-      const filePaths = Object.keys(zip.files);
-      const testMap = {};
+      // 3. Ler problem.yaml
+      const yamlPath = zipFiles.find((p) => /(^|\/)problem\.yaml$/i.test(p));
+      if (yamlPath) {
+        const yamlText = await zip.file(yamlPath).async("string");
+        const nameMatch = yamlText.match(/name\s*:\s*"?([^"\n\r]+)"?/i);
+        const timeMatch = yamlText.match(/time(?:limit)?\s*:\s*([0-9.]+)/i);
+        const memMatch = yamlText.match(/memory(?:limit)?\s*:\s*([0-9.]+)/i);
 
-      filePaths.forEach((path) => {
-        const match = path.match(/^data\/(sample|secret)\/([^/]+)\.(in|ans|out)$/i);
+        if (nameMatch && els.creatorName && !els.creatorName.value) els.creatorName.value = nameMatch[1].trim();
+        if (timeMatch && els.creatorTime && (!els.creatorTime.value || els.creatorTime.value === "1")) els.creatorTime.value = timeMatch[1].trim();
+        if (memMatch && els.creatorMemory && (!els.creatorMemory.value || els.creatorMemory.value === "512")) els.creatorMemory.value = memMatch[1].trim();
+      }
+
+      // 4. Ler testes sample e secret (em qualquer subdiretório)
+      const testMap = {};
+      zipFiles.forEach((path) => {
+        const match = path.match(/(?:^|\/)data\/(sample|secret)\/([^/]+)\.(in|ans|out)$/i);
         if (match) {
           const type = match[1].toLowerCase();
           const baseName = match[2];
@@ -593,19 +1008,22 @@ Explicações adicionais sobre os casos de teste de exemplo.
     }
 
     try {
-      showToast("Gerando pacote e enviando para o DOMjudge...", "info");
+      const isEdit = Boolean(els.creatorIsEditCheckbox?.checked);
+      showToast(isEdit ? "Atualizando problema no DOMjudge..." : "Gerando pacote e enviando novo problema...", "info");
       const zipBlob = await generateZipBlob();
-      const formData = new FormData();
-      formData.append("zip", zipBlob, "problem.zip");
-
       const problemId = els.creatorProblemId?.value?.trim();
-      let url = `${creds.apiBase}/problems`;
-      let method = "POST";
+      const zipFilename = `${problemId || slugify(els.creatorName?.value || "problem")}.zip`;
 
-      if (problemId) {
-        url = `${creds.apiBase}/problems/${encodeURIComponent(problemId)}`;
-        method = "PUT";
+      const formData = new FormData();
+      formData.append("zip", zipBlob, zipFilename);
+
+      // Só anexa o parâmetro 'problem' se o modo de edição estiver ativado
+      if (isEdit && problemId) {
+        formData.append("problem", problemId);
       }
+
+      const url = `${creds.apiBase}/problems`;
+      const method = "POST";
 
       const headers = {};
       if (creds.user && creds.password) {
@@ -624,9 +1042,18 @@ Explicações adicionais sobre os casos de teste de exemplo.
       }
 
       const json = await res.json().catch(() => ({}));
-      const assignedId = json.id || problemId || "criado com sucesso";
-      showToast(`Problema salvo no DOMjudge com ID: ${assignedId}`, "success");
-      setFeedback(`Problema enviado com sucesso! ID: ${assignedId}`);
+      const assignedId = json.problem_id || json.id || problemId || "processado com sucesso";
+      if (assignedId && els.creatorProblemId) {
+        els.creatorProblemId.value = String(assignedId);
+      }
+
+      const msgList = Array.isArray(json.messages) && json.messages.length > 0
+        ? ` (${json.messages.join("; ")})`
+        : "";
+
+      const actionDesc = isEdit ? "atualizado" : "criado";
+      showToast(`Problema ${actionDesc} no DOMjudge com ID: ${assignedId}${msgList}`, "success");
+      setFeedback(`Problema ${actionDesc} com sucesso! ID: ${assignedId}${msgList}`);
     } catch (err) {
       if (err.message && (err.message.includes("401") || err.message.includes("403"))) {
         if (window.handleApiUnauthorized) window.handleApiUnauthorized(err);
@@ -641,6 +1068,14 @@ Explicações adicionais sobre os casos de teste de exemplo.
   // --------------------------------------------------------------------------
   function init() {
     setupToolbar();
+
+    if (els.creatorIsEditCheckbox && els.sendToDomjudgeBtn) {
+      els.creatorIsEditCheckbox.addEventListener("change", () => {
+        els.sendToDomjudgeBtn.textContent = els.creatorIsEditCheckbox.checked
+          ? "🚀 Atualizar no DOMjudge"
+          : "🚀 Enviar para DOMjudge";
+      });
+    }
 
     if (els.addSampleTest) {
       els.addSampleTest.addEventListener("click", () => createTestCard("sample"));
