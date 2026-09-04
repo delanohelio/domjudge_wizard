@@ -1,0 +1,304 @@
+/* ============================================================================
+   DOMAIN-SPECIFIC COMPONENTS STYLES (domain.css)
+   ============================================================================ */
+
+/* 1. CODE VIEWER (UiCodeViewer) */
+.ui-code-viewer {
+  background: #1e1e2e;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.ui-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #181825;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ui-code-file-icon {
+  color: var(--brand);
+}
+
+.ui-code-filename {
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.ui-code-lang-tag {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink-secondary);
+  text-transform: uppercase;
+}
+
+.ui-code-content-wrapper {
+  display: flex;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.ui-code-line-numbers {
+  padding: 16px 10px 16px 14px;
+  background: #151521;
+  color: #585b70;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  text-align: right;
+  user-select: none;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ui-code-pre {
+  margin: 0;
+  padding: 16px;
+  background: transparent !important;
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  line-height: 1.55;
+  flex: 1;
+  overflow-x: auto;
+}
+
+.ui-code-pre code {
+  font-family: inherit;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.ui-code-split-view {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  divide-x: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ui-code-split-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ui-code-col-header {
+  padding: 8px 14px;
+  background: #161622;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+
+.ui-code-col-ac {
+  background: rgba(16, 185, 129, 0.08);
+  color: #6ee7b7;
+}
+
+/* 2. MARKDOWN STUDIO (UiMarkdownStudio) */
+.ui-md-studio {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.ui-md-toolbar {
+  padding: 8px 12px;
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border);
+}
+
+.ui-md-toolbar-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border-strong);
+  margin: 0 4px;
+}
+
+.ui-md-split-pane {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 480px;
+}
+
+.ui-md-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ui-md-pane-editor {
+  border-right: 1px solid var(--border);
+}
+
+.ui-md-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-secondary);
+}
+
+.ui-md-textarea {
+  flex: 1;
+  padding: 16px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--ink);
+  resize: none;
+  min-height: 420px;
+}
+
+.ui-md-preview-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--ink);
+}
+
+.ui-md-preview-body h1 {
+  font-size: 1.6rem;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+.ui-md-preview-body h2 {
+  font-size: 1.3rem;
+  margin-top: 20px;
+  margin-bottom: 10px;
+}
+.ui-md-preview-body h3 {
+  font-size: 1.1rem;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+.ui-md-preview-body p {
+  margin-bottom: 12px;
+}
+.ui-md-preview-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 0.88rem;
+}
+.ui-md-preview-body th,
+.ui-md-preview-body td {
+  border: 1px solid var(--border-strong);
+  padding: 8px 12px;
+}
+.ui-md-preview-body th {
+  background: var(--surface-subtle);
+}
+
+/* 3. TEST CASE CARD (UiTestCaseCard) */
+.ui-test-card {
+  padding: 16px !important;
+  margin-bottom: 12px;
+}
+
+.ui-test-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.ui-test-index {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.ui-test-io-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.ui-test-desc {
+  margin-top: 6px;
+}
+
+/* 4. PASSWORD STRENGTH BAR (UiPasswordStrengthBar) */
+.ui-strength-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.ui-strength-bar-bg {
+  width: 100%;
+  height: 6px;
+  background: var(--surface-hover);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.ui-strength-bar-fill {
+  height: 100%;
+  transition: width 0.3s ease, background-color 0.3s ease;
+  border-radius: var(--radius-full);
+}
+
+.ui-strength-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ui-strength-rules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ui-rule-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  transition: color 0.2s;
+}
+
+.ui-rule-passed {
+  color: var(--success);
+  font-weight: 500;
+}
+
+/* 5. BATCH PREVIEW (UiBatchUserPreview) */
+.ui-batch-preview {
+  margin-top: 14px;
+}
+
+.ui-batch-preview-header {
+  margin-bottom: 10px;
+}

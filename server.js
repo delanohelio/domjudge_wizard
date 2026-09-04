@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const fs = require("fs");
 const puppeteer = require("puppeteer");
 require("dotenv").config();
 
@@ -293,18 +294,29 @@ app.post("/api/change-password", async (req, res) => {
   }
 });
 
-// Rotas amigáveis para a página avulsa e isolada de troca de senha
+// Rotas amigáveis para a página avulsa e isolada de troca de senha (SPA)
 app.get(["/trocar-senha", "/change-password"], (req, res) => {
-  res.sendFile(path.join(__dirname, "trocar-senha.html"));
+  const distPath = path.join(__dirname, "dist");
+  if (fs.existsSync(distPath)) {
+    res.sendFile(path.join(distPath, "index.html"));
+  } else {
+    res.sendFile(path.join(__dirname, "index.html"));
+  }
 });
 
-// Servir arquivos estáticos do diretório raiz
-app.use(express.static(__dirname));
-
-// Fallback SPA
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
-});
+// Servir arquivos estáticos (priorizar dist se compilado)
+const distPath = path.join(__dirname, "dist");
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
+  });
+} else {
+  app.use(express.static(__dirname));
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(__dirname, "index.html"));
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor DOMjudge Wizard rodando na porta ${PORT} (http://localhost:${PORT})`);
