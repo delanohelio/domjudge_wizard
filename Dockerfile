@@ -41,8 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    PORT=7070 \
-    NODE_ENV=production
+    PORT=7070
 
 WORKDIR /app
 
@@ -51,6 +50,8 @@ RUN npm ci
 
 COPY . .
 RUN npm run build && npm prune --omit=dev
+
+ENV NODE_ENV=production
 
 EXPOSE 7070
 
