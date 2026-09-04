@@ -140,6 +140,164 @@ app.post("/api/pdf", async (req, res) => {
   }
 });
 
+// Endpoint de alteração de senha de usuário comum
+app.post("/api/change-password", async (req, res) => {
+  try {
+    const { username, currentPassword, newPassword, confirmPassword } = req.body || {};
+
+    if (!username || typeof username !== "string" || !username.trim()) {
+      return res.status(400).json({ success: false, error: "O usuário é obrigatório." });
+    }
+    if (!currentPassword || typeof currentPassword !== "string") {
+      return res.status(400).json({ success: false, error: "A senha anterior é obrigatória." });
+    }
+    if (!newPassword || typeof newPassword !== "string") {
+      return res.status(400).json({ success: false, error: "A nova senha é obrigatória." });
+    }
+
+    const trimmedUsername = username.trim();
+
+    // Requisito 2.1: a senha precisa ter pelo menos 10 caracteres
+    if (newPassword.length < 10) {
+      return res.status(400).json({
+        success: false,
+        error: "A nova senha deve ter pelo menos 10 caracteres.",
+      });
+    }
+
+    if (confirmPassword !== undefined && newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        error: "A nova senha e a confirmação de senha não coincidem.",
+      });
+    }
+
+    if (newPassword === currentPassword) {
+      return res.status(400).json({
+        success: false,
+        error: "A nova senha deve ser diferente da senha anterior.",
+      });
+    }
+
+    const apiBase = (process.env.DOMJUDGE_API_BASE || "https://coderunner.cin.ufpe.br/api/v4").replace(/\/+$/, "");
+
+    // 1. Validar login e senha anterior via GET /api/v4/user com Basic Auth do próprio usuário
+    const userAuthHeader = `Basic ${Buffer.from(`${trimmedUsername}:${currentPassword}`).toString("base64")}`;
+    let resUser;
+    try {
+      resUser = await fetch(`${apiBase}/user`, {
+        headers: { Authorization: userAuthHeader },
+      });
+    } catch (networkErr) {
+      console.error("Erro de conexão ao validar usuário com DOMjudge:", networkErr);
+      return res.status(502).json({
+        success: false,
+        error: "Não foi possível conectar ao servidor DOMjudge. Tente novamente mais tarde.",
+      });
+    }
+
+    if (resUser.status === 401 || resUser.status === 403) {
+      return res.status(401).json({
+        success: false,
+        error: "Usuário ou senha anterior inválidos.",
+      });
+    }
+
+    if (!resUser.ok) {
+      const errTxt = await resUser.text().catch(() => "");
+      console.error("Erro inesperado na validação do usuário:", resUser.status, errTxt);
+      return res.status(resUser.status).json({
+        success: false,
+        error: "Falha ao validar credenciais no DOMjudge.",
+      });
+    }
+
+    const userData = await resUser.json();
+
+    // Verificação de segurança: garantir correspondência exata de username
+    if (userData.username && userData.username.toLowerCase() !== trimmedUsername.toLowerCase()) {
+      return res.status(401).json({
+        success: false,
+        error: "Usuário ou senha anterior inválidos.",
+      });
+    }
+
+    // 2. Obter credenciais de admin configuradas no servidor para gerenciar contas
+    const adminUser = process.env.DOMJUDGE_ADMIN_USER || process.env.DOMJUDGE_API_USER;
+    const adminPassword = process.env.DOMJUDGE_ADMIN_PASSWORD || process.env.DOMJUDGE_API_PASSWORD;
+
+    if (!adminUser || !adminPassword) {
+      console.error("Credenciais de administrador não configuradas no ambiente (.env).");
+      return res.status(500).json({
+        success: false,
+        error: "Configuração do servidor incompleta: credenciais administrativas não definidas.",
+      });
+    }
+
+    // 3. Montar payload do usuário preservando todos os atributos e aplicando a nova senha
+    const roles = Array.isArray(userData.roles) && userData.roles.length > 0 ? userData.roles : ["team"];
+    const isAdmin = roles.includes("admin");
+    const isJury = roles.includes("jury");
+    const type = userData.type || (isAdmin ? "admin" : (isJury ? "jury" : "team"));
+
+    const accountsToSync = [
+      {
+        type,
+        name: userData.name || userData.username,
+        username: userData.username,
+        email: userData.email || null,
+        team_id: userData.team_id || null,
+        roles,
+        password: newPassword,
+      },
+    ];
+
+    const adminAuthHeader = `Basic ${Buffer.from(`${adminUser}:${adminPassword}`).toString("base64")}`;
+    const fd = new FormData();
+    fd.append("json", new Blob([JSON.stringify(accountsToSync)], { type: "application/json" }), "accounts.json");
+
+    let resUpdate;
+    try {
+      resUpdate = await fetch(`${apiBase}/users/accounts`, {
+        method: "POST",
+        headers: { Authorization: adminAuthHeader },
+        body: fd,
+      });
+    } catch (updateErr) {
+      console.error("Erro de conexão ao atualizar senha via admin:", updateErr);
+      return res.status(502).json({
+        success: false,
+        error: "Não foi possível conectar ao DOMjudge para atualizar a senha.",
+      });
+    }
+
+    if (!resUpdate.ok) {
+      const updateErrTxt = await resUpdate.text().catch(() => "");
+      console.error("Erro retornado pelo DOMjudge ao atualizar conta:", resUpdate.status, updateErrTxt);
+      return res.status(500).json({
+        success: false,
+        error: "O servidor DOMjudge recusou a atualização de senha.",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Senha alterada com sucesso! Você já pode utilizar a sua nova senha para acessar o DOMjudge.",
+    });
+  } catch (err) {
+    console.error("Erro interno ao processar troca de senha:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Ocorreu um erro interno ao processar a solicitação. Tente novamente mais tarde.",
+    });
+  }
+});
+
+// Rotas amigáveis para a página avulsa e isolada de troca de senha
+app.get(["/trocar-senha", "/change-password"], (req, res) => {
+  res.sendFile(path.join(__dirname, "trocar-senha.html"));
+});
+
 // Servir arquivos estáticos do diretório raiz
 app.use(express.static(__dirname));
 
