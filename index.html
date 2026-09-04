@@ -827,7 +827,10 @@
           </div>
           <div class="form-group">
             <label for="editPassword">Nova Senha (opcional)</label>
-            <input id="editPassword" type="password" placeholder="Deixe em branco para não alterar" />
+            <div style="display: flex; gap: 8px;">
+              <input id="editPassword" type="password" placeholder="Deixe em branco para não alterar" style="flex: 1;" />
+              <button type="button" id="generateEditPasswordBtn" class="dim btn-sm" title="Gerar senha aleatória de pelo menos 10 caracteres" style="white-space: nowrap;">🎲 Gerar Senha</button>
+            </div>
           </div>
           <div class="form-group" style="grid-column: 1 / -1;">
             <label class="checkbox-label">
@@ -862,6 +865,59 @@
             <button type="submit" class="primary">Salvar Alterações</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- =====================================================================
+         MODAL: SENHA ALEATÓRIA GERADA
+         ===================================================================== -->
+    <div id="generatedPasswordModal" class="modal-overlay" hidden>
+      <div class="modal-box" style="max-width: 500px;">
+        <div class="modal-header">
+          <h3 class="modal-title">🔑 Nova Senha Gerada</h3>
+          <button type="button" class="modal-close-btn" id="closeGenPasswordModalBtn">&times;</button>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <div>
+            <p style="font-size: 0.85rem; color: var(--ink-secondary); margin-bottom: 4px;">
+              Usuário selecionado:
+            </p>
+            <div style="font-size: 1.05rem; font-weight: 700; color: var(--ink);" id="genPasswordUserLabel">
+              -
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="genPasswordDisplay" style="font-size: 0.85rem; font-weight: 600;">
+              Senha gerada (12 caracteres):
+            </label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input
+                id="genPasswordDisplay"
+                type="text"
+                readonly
+                style="font-family: var(--font-mono); font-size: 1.15rem; font-weight: 600; letter-spacing: 0.05em; background: var(--surface-subtle); color: var(--brand); text-align: center; border: 1px solid var(--border-strong); flex: 1; height: 42px;"
+              />
+              <button
+                type="button"
+                id="copyGenPasswordBtn"
+                class="primary"
+                style="white-space: nowrap; padding: 0 16px; height: 42px; font-weight: 600;"
+              >
+                📋 Copiar
+              </button>
+            </div>
+          </div>
+
+          <div style="background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; font-size: 0.82rem; color: var(--ink-secondary); line-height: 1.45;">
+            💡 <strong>Atenção:</strong> Esta nova senha foi atribuída ao usuário na tabela local. Lembre-se de clicar em <strong>"💾 Salvar Alterações"</strong> no topo da tabela para sincronizar no DOMjudge.
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px;">
+            <button type="button" id="okGenPasswordModalBtn" class="primary">Concluído</button>
+          </div>
+        </div>
       </div>
     </div>
 

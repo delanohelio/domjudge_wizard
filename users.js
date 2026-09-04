@@ -102,7 +102,107 @@ const UsersModule = (() => {
     editEnabled: document.getElementById("editEnabled"),
     editCategoryField: document.getElementById("editCategoryField"),
     editLabelsField: document.getElementById("editLabelsField"),
+    generateEditPasswordBtn: document.getElementById("generateEditPasswordBtn"),
+    generatedPasswordModal: document.getElementById("generatedPasswordModal"),
+    closeGenPasswordModalBtn: document.getElementById("closeGenPasswordModalBtn"),
+    okGenPasswordModalBtn: document.getElementById("okGenPasswordModalBtn"),
+    genPasswordUserLabel: document.getElementById("genPasswordUserLabel"),
+    genPasswordDisplay: document.getElementById("genPasswordDisplay"),
+    copyGenPasswordBtn: document.getElementById("copyGenPasswordBtn"),
   };
+
+  // Gerador criptograficamente seguro de senha com pelo menos 10 caracteres
+  function generateSecurePassword(length = 12) {
+    const finalLength = Math.max(length, 10);
+    const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"; // sem I, O
+    const lower = "abcdefghijkmnopqrstuvwxyz"; // sem l
+    const digits = "23456789"; // sem 0, 1
+    const symbols = "!@#$%&*";
+    const all = upper + lower + digits + symbols;
+
+    const getRandom = (charset) => {
+      const arr = new Uint32Array(1);
+      window.crypto.getRandomValues(arr);
+      return charset[arr[0] % charset.length];
+    };
+
+    let pwd = [
+      getRandom(upper),
+      getRandom(lower),
+      getRandom(digits),
+      getRandom(symbols),
+    ];
+
+    const arr = new Uint32Array(finalLength - 4);
+    window.crypto.getRandomValues(arr);
+    for (let i = 0; i < arr.length; i++) {
+      pwd.push(all[arr[i] % all.length]);
+    }
+
+    // Embaralhar caracteres
+    for (let i = pwd.length - 1; i > 0; i--) {
+      const randArr = new Uint32Array(1);
+      window.crypto.getRandomValues(randArr);
+      const j = randArr[0] % (i + 1);
+      [pwd[i], pwd[j]] = [pwd[j], pwd[i]];
+    }
+
+    return pwd.join("");
+  }
+
+  async function copyToClipboard(text, buttonEl) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const tempInput = document.createElement("input");
+        tempInput.value = text;
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        document.execCommand("copy");
+        document.body.removeChild(tempInput);
+      }
+
+      if (buttonEl) {
+        const origHtml = buttonEl.innerHTML;
+        buttonEl.innerHTML = "✅ Copiado!";
+        buttonEl.disabled = true;
+        setTimeout(() => {
+          buttonEl.innerHTML = origHtml;
+          buttonEl.disabled = false;
+        }, 2000);
+      }
+      showToast("Senha copiada para a área de transferência!", "success");
+      return true;
+    } catch (err) {
+      console.error("Falha ao copiar:", err);
+      showToast("Não foi possível copiar automaticamente. Selecione e copie manualmente.", "warning");
+      return false;
+    }
+  }
+
+  function openGeneratedPasswordModal(user, password) {
+    if (!els.generatedPasswordModal) return;
+    if (els.genPasswordUserLabel) {
+      els.genPasswordUserLabel.textContent = `${user.username} (${user.name})`;
+    }
+    if (els.genPasswordDisplay) {
+      els.genPasswordDisplay.value = password;
+    }
+    els.generatedPasswordModal.hidden = false;
+  }
+
+  function handleGeneratePasswordForUser(user) {
+    if (!user) return;
+    const newPwd = generateSecurePassword(12);
+    user.password = newPwd;
+
+    updateKpis();
+    renderTable();
+
+    openGeneratedPasswordModal(user, newPwd);
+    showToast(`Nova senha de 12 caracteres gerada para "${user.username}"! Clique em Salvar para sincronizar.`, "info", 6000);
+  }
 
   function showToast(msg, type = "info") {
     if (window.showToast) {
@@ -828,6 +928,7 @@ const UsersModule = (() => {
         <td><div class="pill-list">${rolesHtml}</div></td>
         <td style="text-align: center;">${statusBadge}</td>
         <td style="text-align: right; white-space: nowrap;">
+          <button type="button" class="btn-sm dim btn-generate-pwd" data-id="${sanitize(uId)}" title="Gerar senha aleatória de pelo menos 10 caracteres para este usuário" style="margin-right: 4px;">🔑 Senha</button>
           <button type="button" class="btn-sm dim edit-user-btn" data-id="${sanitize(uId)}" title="Editar dados deste usuário">✏️ Editar</button>
           <button type="button" class="btn-sm btn-delete-row" data-id="${sanitize(uId)}" title="Remover usuário desta tabela" style="margin-left: 6px; color: var(--danger); border-color: rgba(239, 68, 68, 0.35);">🗑️</button>
         </td>
@@ -854,6 +955,14 @@ const UsersModule = (() => {
       tr.querySelector(".edit-user-btn").addEventListener("click", () => {
         openEditModal(user);
       });
+
+      // Botão gerar senha aleatória
+      const genPwdBtn = tr.querySelector(".btn-generate-pwd");
+      if (genPwdBtn) {
+        genPwdBtn.addEventListener("click", () => {
+          handleGeneratePasswordForUser(user);
+        });
+      }
 
       // Botão remover linha
       const delBtn = tr.querySelector(".btn-delete-row");
@@ -1681,6 +1790,37 @@ const UsersModule = (() => {
     if (els.createSingleForm) els.createSingleForm.addEventListener("submit", saveCreateSingle);
     if (els.editSingleForm) els.editSingleForm.addEventListener("submit", saveEditModal);
     if (els.processBatchBtn) els.processBatchBtn.addEventListener("click", processBatchUsers);
+
+    // Botão Gerar Senha no modal de edição
+    if (els.generateEditPasswordBtn) {
+      els.generateEditPasswordBtn.addEventListener("click", () => {
+        const pwd = generateSecurePassword(12);
+        if (els.editPassword) {
+          els.editPassword.value = pwd;
+          els.editPassword.type = "text";
+        }
+        copyToClipboard(pwd, els.generateEditPasswordBtn);
+      });
+    }
+
+    // Modal de Senha Gerada (fechar / copiar)
+    if (els.closeGenPasswordModalBtn) {
+      els.closeGenPasswordModalBtn.addEventListener("click", () => {
+        if (els.generatedPasswordModal) els.generatedPasswordModal.hidden = true;
+      });
+    }
+    if (els.okGenPasswordModalBtn) {
+      els.okGenPasswordModalBtn.addEventListener("click", () => {
+        if (els.generatedPasswordModal) els.generatedPasswordModal.hidden = true;
+      });
+    }
+    if (els.copyGenPasswordBtn) {
+      els.copyGenPasswordBtn.addEventListener("click", () => {
+        if (els.genPasswordDisplay) {
+          copyToClipboard(els.genPasswordDisplay.value, els.copyGenPasswordBtn);
+        }
+      });
+    }
 
     // Abas do Modal Criar Usuários
     if (els.tabSingleBtn && els.tabBatchBtn) {
