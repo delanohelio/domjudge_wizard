@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  Trophy,
+  BookOpen,
   Activity,
   Calendar,
   Save,
@@ -10,6 +10,8 @@ import {
   CheckCircle,
   AlertCircle,
   Clock,
+  Eye,
+  Check,
 } from "lucide-react";
 import {
   UiCard,
@@ -29,12 +31,14 @@ import {
   Column,
 } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
+import { useContest } from "@/context/ContestContext";
 import { useToast } from "@/context/ToastContext";
 import { DomjudgeApiService } from "@/services/domjudgeApi";
 import { Contest } from "@/types/domjudge";
 
 export const ContestManagerView: React.FC = () => {
   const { credentials, isAuthenticated } = useAuth();
+  const { setSelectedContestId, refreshContests: refreshGlobalContests } = useContest();
   const { showToast } = useToast();
 
   const [contests, setContests] = useState<Contest[]>([]);
@@ -75,10 +79,10 @@ export const ContestManagerView: React.FC = () => {
         _changed: false,
       }));
       setContests(enriched);
-      showToast(`${enriched.length} contests carregados com sucesso!`, "success");
+      showToast(`${enriched.length} listas de exercícios carregadas!`, "success");
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || "Falha ao carregar contests.", "error");
+      showToast(err.message || "Falha ao carregar listas de exercícios.", "error");
     } finally {
       setLoading(false);
     }
@@ -88,7 +92,7 @@ export const ContestManagerView: React.FC = () => {
     loadContests();
   }, [loadContests]);
 
-  // Edição inline de contest
+  // Edição inline de lista
   const updateContestField = (id: string, field: "start_time" | "end_time" | "enabled", value: any) => {
     setContests((prev) =>
       prev.map((c) => {
@@ -149,31 +153,21 @@ export const ContestManagerView: React.FC = () => {
   // KPIs
   const totalCount = contests.length;
   const activeCount = contests.filter((c) => c.enabled).length;
-  const upcomingCount = contests.filter((c) => {
-    if (!c.start_time) return false;
-    return new Date(c.start_time).getTime() > Date.now();
-  }).length;
   const changedCount = contests.filter((c) => c._changed).length;
 
-  // Aplicar alteração em massa
+  // Ação em massa
   const handleApplyBulk = () => {
     const targets = bulkScope === "page" ? pagedContests : filteredContests;
-    if (targets.length === 0) {
-      showToast("Nenhum contest selecionado no escopo definido.", "warning");
-      return;
-    }
-
-    const targetIds = new Set(targets.map((t) => t.id));
+    const targetIds = new Set(targets.map((c) => c.id));
 
     setContests((prev) =>
       prev.map((c) => {
         if (!targetIds.has(c.id)) return c;
-        const updated = {
-          ...c,
-          start_time: bulkStart ? new Date(bulkStart).toISOString() : c.start_time,
-          end_time: bulkEnd ? new Date(bulkEnd).toISOString() : c.end_time,
-          enabled: bulkEnabled !== null ? bulkEnabled : c.enabled,
-        };
+        const updated = { ...c };
+        if (bulkStart) updated.start_time = new Date(bulkStart).toISOString();
+        if (bulkEnd) updated.end_time = new Date(bulkEnd).toISOString();
+        if (bulkEnabled !== null) updated.enabled = bulkEnabled;
+
         const orig = updated._original;
         const isChanged = Boolean(
           orig &&
@@ -185,14 +179,14 @@ export const ContestManagerView: React.FC = () => {
       })
     );
 
-    showToast(`Alterações aplicadas a ${targets.length} contests! Lembre-se de salvar.`, "info");
+    showToast(`Parâmetros aplicados a ${targetIds.size} listas de exercícios.`, "info");
   };
 
-  // Salvar alterações via API
+  // Salvar alterações na API do DOMjudge
   const handleSaveChanges = async () => {
     const changed = contests.filter((c) => c._changed);
     if (changed.length === 0) {
-      showToast("Não há alterações pendentes para salvar.", "info");
+      showToast("Nenhuma alteração pendente para salvar.", "info");
       return;
     }
 
@@ -209,15 +203,15 @@ export const ContestManagerView: React.FC = () => {
         });
         successCount++;
       } catch (err) {
-        console.error(`Falha ao salvar contest ${c.id}:`, err);
+        console.error(`Erro ao atualizar lista ${c.id}:`, err);
         failCount++;
       }
     }
 
     setSaving(false);
+
     if (failCount === 0) {
-      showToast(`${successCount} contests atualizados com sucesso no DOMjudge!`, "success");
-      // Atualizar originais
+      showToast(`${successCount} listas de exercícios atualizadas no DOMjudge!`, "success");
       setContests((prev) =>
         prev.map((c) => ({
           ...c,
@@ -229,12 +223,12 @@ export const ContestManagerView: React.FC = () => {
           _changed: false,
         }))
       );
+      refreshGlobalContests();
     } else {
-      showToast(`${successCount} salvos, mas ${failCount} falharam.`, "error");
+      showToast(`${successCount} listas salvas, mas ${failCount} falharam.`, "error");
     }
   };
 
-  // Helpers para formatação de data
   const formatDateForInput = (isoString: string | null): string => {
     if (!isoString) return "";
     try {
@@ -244,6 +238,11 @@ export const ContestManagerView: React.FC = () => {
     } catch {
       return "";
     }
+  };
+
+  const handleFocusContest = (contestId: string) => {
+    setSelectedContestId(contestId);
+    window.location.hash = "#review";
   };
 
   const columns: Column<Contest>[] = [
@@ -256,7 +255,7 @@ export const ContestManagerView: React.FC = () => {
     },
     {
       key: "name",
-      title: "Contest",
+      title: "Lista de Exercícios",
       sortable: true,
       render: (c) => (
         <UiStack gap={2}>
@@ -267,7 +266,7 @@ export const ContestManagerView: React.FC = () => {
     },
     {
       key: "start_time",
-      title: "Início",
+      title: "Abertura da Lista",
       width: "220px",
       sortable: true,
       render: (c) => (
@@ -287,7 +286,7 @@ export const ContestManagerView: React.FC = () => {
     },
     {
       key: "end_time",
-      title: "Fim",
+      title: "Prazo de Entrega",
       width: "220px",
       sortable: true,
       render: (c) => (
@@ -307,7 +306,7 @@ export const ContestManagerView: React.FC = () => {
     },
     {
       key: "enabled",
-      title: "Status",
+      title: "Recebendo Envios",
       width: "140px",
       sortable: true,
       align: "center",
@@ -316,13 +315,13 @@ export const ContestManagerView: React.FC = () => {
           size="sm"
           checked={Boolean(c.enabled)}
           onChange={(val) => updateContestField(c.id, "enabled", val)}
-          label={c.enabled ? "Ativo" : "Inativo"}
+          label={c.enabled ? "Aberta" : "Encerrada"}
         />
       ),
     },
     {
       key: "_changed",
-      title: "Alteração",
+      title: "Status",
       width: "110px",
       align: "center",
       render: (c) => {
@@ -335,10 +334,27 @@ export const ContestManagerView: React.FC = () => {
         }
         return (
           <UiBadge variant="neutral" size="sm">
-            Sincronizado
+            Salvo
           </UiBadge>
         );
       },
+    },
+    {
+      key: "actions",
+      title: "Ações",
+      width: "130px",
+      align: "center",
+      render: (c) => (
+        <UiButton
+          size="sm"
+          variant="dim"
+          icon={<Eye size={14} />}
+          onClick={() => handleFocusContest(c.id)}
+          title="Abrir no Acompanhamento de Entregas"
+        >
+          Acompanhar
+        </UiButton>
+      ),
     },
   ];
 
@@ -348,9 +364,12 @@ export const ContestManagerView: React.FC = () => {
       <UiCard variant="glow">
         <UiFlex justify="between" align="center" wrap gap={16}>
           <UiStack gap={4}>
-            <h2 className="text-xl font-bold">Gerenciador de Contests</h2>
+            <UiFlex gap={8} align="center">
+              <BookOpen className="text-brand" size={24} />
+              <h2 className="text-xl font-bold">Gestão de Listas de Exercícios Práticos</h2>
+            </UiFlex>
             <p className="text-muted text-sm">
-              Altere datas, horários e status de múltiplos contests diretamente via API do DOMjudge.
+              Defina prazos de entrega, datas de liberação e controle o período em que os alunos podem submeter resoluções.
             </p>
           </UiStack>
 
@@ -377,45 +396,39 @@ export const ContestManagerView: React.FC = () => {
       </UiCard>
 
       {/* KPI Cards */}
-      <UiGrid columns={4} gap={16}>
+      <UiGrid columns={3} gap={16}>
         <UiMetricCard
-          title="Total de Contests"
+          title="Total de Listas"
           value={totalCount}
-          icon={<Trophy size={20} />}
-          variant="brand"
+          icon={<BookOpen size={20} />}
+          subtitle="Cadastradas no DOMjudge"
         />
         <UiMetricCard
-          title="Contests Ativos"
+          title="Listas Abertas"
           value={activeCount}
           icon={<Activity size={20} />}
-          variant="success"
-        />
-        <UiMetricCard
-          title="Agendados"
-          value={upcomingCount}
-          icon={<Calendar size={20} />}
-          variant="info"
+          subtitle="Aceitando submissões dos alunos"
         />
         <UiMetricCard
           title="Alterações Pendentes"
           value={changedCount}
           icon={<AlertCircle size={20} />}
-          variant={changedCount > 0 ? "warning" : "brand"}
+          subtitle={changedCount > 0 ? "Clique em 'Salvar Alterações'" : "Todas sincronizadas"}
         />
       </UiGrid>
 
       {/* Filtros e Ações em Massa */}
       <UiCard variant="default">
         <UiCardHeader>
-          <UiCardTitle>Filtros e Operações em Massa</UiCardTitle>
+          <UiCardTitle>Filtros e Prazos em Massa</UiCardTitle>
         </UiCardHeader>
 
         <UiCardContent>
           <UiStack gap={16}>
             <UiGrid columns={3} gap={14}>
               <UiTextInput
-                label="Buscar Contests"
-                placeholder="Filtrar por nome, ID ou shortname..."
+                label="Buscar Listas"
+                placeholder="Filtrar por nome ou ID..."
                 value={filterText}
                 onChange={(e) => setFilterText(e.target.value)}
                 startIcon={<Search size={16} />}
@@ -424,9 +437,9 @@ export const ContestManagerView: React.FC = () => {
               <UiSelect
                 label="Filtrar por Status"
                 options={[
-                  { value: "all", label: "Todos os Status" },
-                  { value: "enabled", label: "Apenas Ativos" },
-                  { value: "disabled", label: "Apenas Inativos" },
+                  { value: "all", label: "Todas as Listas" },
+                  { value: "enabled", label: "Apenas Abertas" },
+                  { value: "disabled", label: "Apenas Encerradas" },
                 ]}
                 value={filterEnabled}
                 onChange={setFilterEnabled}
@@ -435,9 +448,9 @@ export const ContestManagerView: React.FC = () => {
               <UiSelect
                 label="Filtrar Alterações"
                 options={[
-                  { value: "all", label: "Todos" },
-                  { value: "changed", label: "Somente Modificados" },
-                  { value: "unchanged", label: "Somente Sincronizados" },
+                  { value: "all", label: "Todas" },
+                  { value: "changed", label: "Somente Modificadas" },
+                  { value: "unchanged", label: "Somente Sincronizadas" },
                 ]}
                 value={filterChanged}
                 onChange={setFilterChanged}
@@ -447,7 +460,7 @@ export const ContestManagerView: React.FC = () => {
             {/* Painel de Aplicação em Massa */}
             <UiCard variant="subtle">
               <UiFlex justify="between" align="center" wrap gap={12}>
-                <span className="font-bold text-sm">Aplicar em Massa:</span>
+                <span className="font-bold text-sm">Prazo em Massa para a Turma:</span>
 
                 <UiFlex gap={12} wrap align="center">
                   <UiTextInput
@@ -455,7 +468,7 @@ export const ContestManagerView: React.FC = () => {
                     type="datetime-local"
                     value={bulkStart}
                     onChange={(e) => setBulkStart(e.target.value)}
-                    placeholder="Início em massa"
+                    placeholder="Início"
                   />
 
                   <UiTextInput
@@ -463,17 +476,23 @@ export const ContestManagerView: React.FC = () => {
                     type="datetime-local"
                     value={bulkEnd}
                     onChange={(e) => setBulkEnd(e.target.value)}
-                    placeholder="Fim em massa"
+                    placeholder="Prazo Final"
                   />
 
                   <UiSelect
                     size="sm"
                     options={[
                       { value: "keep", label: "Manter Status" },
-                      { value: "enable", label: "Habilitar Todos" },
-                      { value: "disable", label: "Desabilitar Todos" },
+                      { value: "enable", label: "Abrir Todas" },
+                      { value: "disable", label: "Encerrar Todas" },
                     ]}
-                    value={bulkEnabled === true ? "enable" : bulkEnabled === false ? "disable" : "keep"}
+                    value={
+                      bulkEnabled === true
+                        ? "enable"
+                        : bulkEnabled === false
+                        ? "disable"
+                        : "keep"
+                    }
                     onChange={(val) => {
                       if (val === "enable") setBulkEnabled(true);
                       else if (val === "disable") setBulkEnabled(false);
@@ -485,7 +504,7 @@ export const ContestManagerView: React.FC = () => {
                     size="sm"
                     options={[
                       { value: "page", label: "Página Atual" },
-                      { value: "filtered", label: "Todos Filtrados" },
+                      { value: "filtered", label: "Todas Filtradas" },
                     ]}
                     value={bulkScope}
                     onChange={(val) => setBulkScope(val as any)}
@@ -496,7 +515,7 @@ export const ContestManagerView: React.FC = () => {
                     variant="secondary"
                     onClick={handleApplyBulk}
                   >
-                    Aplicar Valores
+                    Aplicar Datas
                   </UiButton>
                 </UiFlex>
               </UiFlex>
@@ -505,7 +524,7 @@ export const ContestManagerView: React.FC = () => {
         </UiCardContent>
       </UiCard>
 
-      {/* Tabela de Contests */}
+      {/* Tabela de Listas */}
       <UiTable
         columns={columns}
         data={pagedContests}

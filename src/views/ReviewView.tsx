@@ -10,6 +10,13 @@ import {
   XCircle,
   Clock,
   Code2,
+  Users,
+  BookOpen,
+  GraduationCap,
+  Award,
+  AlertTriangle,
+  Search,
+  Check,
 } from "lucide-react";
 import {
   UiCard,
@@ -20,98 +27,100 @@ import {
   UiFlex,
   UiGrid,
   UiButton,
+  UiTextInput,
   UiSelect,
   UiBadge,
   UiTable,
   UiSpinner,
   UiEmptyState,
   UiTabs,
+  UiModal,
+  UiMetricCard,
   Column,
 } from "@/components/ui";
 import { UiCodeViewer } from "@/components/domain";
 import { useAuth } from "@/context/AuthContext";
+import { useContest } from "@/context/ContestContext";
 import { useToast } from "@/context/ToastContext";
 import { DomjudgeApiService } from "@/services/domjudgeApi";
-import { Contest, Problem, Submission, Team } from "@/types/domjudge";
+import { Problem, Submission, Team } from "@/types/domjudge";
 
 export const ReviewView: React.FC = () => {
   const { credentials, isAuthenticated } = useAuth();
+  const {
+    contests,
+    selectedContestId,
+    setSelectedContestId,
+    selectedClassFilter,
+    refreshContests,
+  } = useContest();
   const { showToast } = useToast();
 
   const [loading, setLoading] = useState(false);
-  const [contests, setContests] = useState<Contest[]>([]);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
 
-  // Sub-views
+  // Sub-views pedagógicas
   const [viewMode, setViewMode] = useState<string>("question");
-  const [selectedContestIds, setSelectedContestIds] = useState<string[]>(["all"]);
-  const [selectedProblemIds, setSelectedProblemIds] = useState<string[]>(["all"]);
-  const [selectedTeamKey, setSelectedTeamKey] = useState<string>("all");
-  const [selectedStatusIds, setSelectedStatusIds] = useState<string[]>(["all"]);
+  const [studentSearch, setStudentSearch] = useState<string>("");
+  const [selectedProblemId, setSelectedProblemId] = useState<string>("all");
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>("all");
 
   // Aluno por vez (step index)
   const [stepIndex, setStepIndex] = useState(0);
 
   // Cache de código fonte
   const [codeCache, setCodeCache] = useState<Record<string, { source: string; filename: string }>>({});
-  const [selectedSubmissionForModal, setSelectedSubmissionForModal] = useState<Submission | null>(null);
+  const [inspectModalSub, setInspectModalSub] = useState<Submission | null>(null);
+  const [inspectModalCode, setInspectModalCode] = useState<string>("");
 
   const api = useMemo(() => new DomjudgeApiService(credentials), [credentials]);
 
+  // Carregar dados do contest selecionado
   const loadData = useCallback(async () => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || !selectedContestId) return;
     setLoading(true);
     try {
-      const contestList = await api.getContests();
-      setContests(contestList);
+      const [probList, subList, teamList, judgeList] = await Promise.all([
+        api.getProblems(selectedContestId).catch(() => []),
+        api.getSubmissions(selectedContestId).catch(() => []),
+        api.getTeams(selectedContestId).catch(() => []),
+        api.getJudgements(selectedContestId).catch(() => []),
+      ]);
 
-      const activeContests = contestList.filter((c) => c.enabled);
-      const targetContest = activeContests[0] || contestList[0];
+      const judgeMap = new Map<string, any>();
+      judgeList.forEach((j) => {
+        if (j.valid) judgeMap.set(j.submission_id, j);
+      });
 
-      if (targetContest) {
-        const cid = targetContest.id;
-        const [probList, subList, teamList, judgeList] = await Promise.all([
-          api.getProblems(cid).catch(() => []),
-          api.getSubmissions(cid).catch(() => []),
-          api.getTeams(cid).catch(() => []),
-          api.getJudgements(cid).catch(() => []),
-        ]);
+      const enrichedSubs: Submission[] = subList.map((s) => {
+        const j = judgeMap.get(s.id);
+        const verdict = j?.judgement_type_id || "PENDING";
+        return {
+          ...s,
+          judgement: j,
+          judgementType: verdict,
+        };
+      });
 
-        const judgeMap = new Map<string, any>();
-        judgeList.forEach((j) => {
-          if (j.valid) judgeMap.set(j.submission_id, j);
-        });
-
-        const enrichedSubs: Submission[] = subList.map((s) => {
-          const j = judgeMap.get(s.id);
-          const verdict = j?.judgement_type_id || "PENDING";
-          return {
-            ...s,
-            judgement: j,
-            judgementType: verdict,
-          };
-        });
-
-        setProblems(probList);
-        setSubmissions(enrichedSubs);
-        setTeams(teamList);
-      }
-      showToast("Dados de submissões atualizados com sucesso!", "success");
+      setProblems(probList);
+      setSubmissions(enrichedSubs);
+      setTeams(teamList);
+      setStepIndex(0);
     } catch (err: any) {
-      console.error(err);
-      showToast(err.message || "Falha ao carregar submissões.", "error");
+      console.error("[ReviewView] Erro ao carregar dados:", err);
+      showToast(err.message || "Falha ao carregar submissões da lista.", "error");
     } finally {
       setLoading(false);
     }
-  }, [api, isAuthenticated, showToast]);
+  }, [api, isAuthenticated, selectedContestId, showToast]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // Obter código com cache
+  // Obter código fonte com cache
   const fetchSource = async (submission: Submission): Promise<string> => {
     if (codeCache[submission.id]) return codeCache[submission.id].source;
     try {
@@ -130,35 +139,108 @@ export const ReviewView: React.FC = () => {
     return "// Código fonte não disponível para esta submissão.";
   };
 
+  // Abrir modal de inspeção de código
+  const handleOpenInspectModal = async (sub: Submission) => {
+    setInspectModalSub(sub);
+    const code = await fetchSource(sub);
+    setInspectModalCode(code);
+  };
+
+  // Filtrar equipes pela turma global (selectedClassFilter)
+  const classFilteredTeams = useMemo(() => {
+    return teams.filter((t) => {
+      if (selectedClassFilter === "all") return true;
+      const labelStr = (t.label || "").toLowerCase();
+      const nameStr = (t.name || "").toLowerCase();
+      const target = selectedClassFilter.toLowerCase();
+      return labelStr.includes(target) || nameStr.includes(target);
+    });
+  }, [teams, selectedClassFilter]);
+
+  // Filtragem de estudantes por busca de texto
+  const filteredTeams = useMemo(() => {
+    return classFilteredTeams.filter((t) => {
+      if (!studentSearch.trim()) return true;
+      const q = studentSearch.toLowerCase();
+      const name = (t.display_name || t.name || "").toLowerCase();
+      const label = (t.label || "").toLowerCase();
+      return name.includes(q) || label.includes(q) || t.id.toLowerCase().includes(q);
+    });
+  }, [classFilteredTeams, studentSearch]);
+
   // Filtragem de submissões
   const filteredSubmissions = useMemo(() => {
+    const validTeamIds = new Set(filteredTeams.map((t) => t.id));
+
     return submissions.filter((sub) => {
-      if (!selectedContestIds.includes("all") && !selectedContestIds.includes(sub.contest_id)) return false;
-      if (!selectedProblemIds.includes("all") && !selectedProblemIds.includes(sub.problem_id)) return false;
-      if (selectedTeamKey !== "all" && sub.team_id !== selectedTeamKey) return false;
-      if (!selectedStatusIds.includes("all")) {
-        const type = sub.judgementType || "PENDING";
-        if (!selectedStatusIds.includes(type)) return false;
+      // Filtrar apenas alunos da turma / busca atual
+      if (!validTeamIds.has(sub.team_id)) return false;
+
+      // Filtrar por problema
+      if (selectedProblemId !== "all" && sub.problem_id !== selectedProblemId) {
+        return false;
       }
+
+      // Filtrar por status / veredito
+      if (selectedStatusFilter !== "all") {
+        const type = sub.judgementType || "PENDING";
+        if (type !== selectedStatusFilter) return false;
+      }
+
       return true;
     });
-  }, [submissions, selectedContestIds, selectedProblemIds, selectedTeamKey, selectedStatusIds]);
+  }, [submissions, filteredTeams, selectedProblemId, selectedStatusFilter]);
 
-  // Atalhos de teclado no modo "Aluno por Vez"
+  // Métricas Pedagógicas
+  const metrics = useMemo(() => {
+    const totalStudents = classFilteredTeams.length;
+    const activeStudentIds = new Set(submissions.map((s) => s.team_id));
+    const activeStudents = classFilteredTeams.filter((t) => activeStudentIds.has(t.id)).length;
+
+    const totalProblems = problems.length;
+    let totalSolvedPairs = 0;
+
+    classFilteredTeams.forEach((team) => {
+      const studentSubs = submissions.filter((s) => s.team_id === team.id);
+      const solvedProblems = new Set(
+        studentSubs.filter((s) => s.judgementType === "AC").map((s) => s.problem_id)
+      );
+      totalSolvedPairs += solvedProblems.size;
+    });
+
+    const maxPossibleSolves = totalStudents * Math.max(1, totalProblems);
+    const completionRate =
+      maxPossibleSolves > 0 ? Math.round((totalSolvedPairs / maxPossibleSolves) * 100) : 0;
+
+    const totalSubmissionsCount = filteredSubmissions.length;
+    const acCount = filteredSubmissions.filter((s) => s.judgementType === "AC").length;
+    const acRate =
+      totalSubmissionsCount > 0 ? Math.round((acCount / totalSubmissionsCount) * 100) : 0;
+
+    return {
+      totalStudents,
+      activeStudents,
+      completionRate,
+      totalSubmissionsCount,
+      acRate,
+    };
+  }, [classFilteredTeams, submissions, problems, filteredSubmissions]);
+
+  // Atalhos de teclado no modo "Correção Passo a Passo"
   useEffect(() => {
     if (viewMode !== "step") return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowLeft") {
         setStepIndex((prev) => Math.max(0, prev - 1));
       } else if (e.key === "ArrowRight") {
-        setStepIndex((prev) => Math.min(teams.length - 1, prev + 1));
+        setStepIndex((prev) => Math.min(filteredTeams.length - 1, prev + 1));
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [viewMode, teams.length]);
+  }, [viewMode, filteredTeams.length]);
 
-  // Exportar CSV
+  // Exportar Relatório CSV
   const handleExportCsv = () => {
     if (filteredSubmissions.length === 0) {
       showToast("Não há submissões para exportar com os filtros atuais.", "warning");
@@ -168,7 +250,7 @@ export const ReviewView: React.FC = () => {
     const teamMap = new Map(teams.map((t) => [t.id, t.name || t.display_name || t.id]));
     const probMap = new Map(problems.map((p) => [p.id, p.name || p.id]));
 
-    const headers = ["ID", "Contest", "Estudante", "Questão", "Linguagem", "Veredito", "Horário"];
+    const headers = ["ID", "Lista", "Aluno", "Exercício", "Linguagem", "Veredito", "Horário"];
     const rows = filteredSubmissions.map((s) => [
       s.id,
       s.contest_id,
@@ -179,76 +261,105 @@ export const ReviewView: React.FC = () => {
       s.time,
     ]);
 
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `submissoes_domjudge_${Date.now()}.csv`);
+    link.setAttribute(
+      "download",
+      `relatorio_turma_${selectedContestId}_${Date.now()}.csv`
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast("Exportação CSV concluída com sucesso!", "success");
+    showToast("Relatório pedagógico CSV exportado com sucesso!", "success");
   };
 
-  // Salvar Dataset ZIP
-  const handleSaveDataset = async () => {
-    showToast("Compilando dataset de submissões...", "info");
-    // Montar dataset com as soluções
-    showToast("Dataset (.zip) preparado para download!", "success");
-  };
-
-  // Render da lista por Questão
+  // Sub-view 1: Por Exercício
   const renderQuestionView = () => {
     const probMap = new Map(problems.map((p) => [p.id, p]));
     const teamMap = new Map(teams.map((t) => [t.id, t]));
 
-    // Agrupar submissões por problema
+    // Agrupar submissões por exercício
     const grouped = new Map<string, Submission[]>();
+    problems.forEach((p) => grouped.set(p.id, []));
     filteredSubmissions.forEach((sub) => {
       const arr = grouped.get(sub.problem_id) || [];
       arr.push(sub);
       grouped.set(sub.problem_id, arr);
     });
 
-    if (grouped.size === 0) {
-      return <UiEmptyState title="Nenhuma submissão encontrada" description="Ajuste os filtros de contest, questão ou estudante." />;
+    if (problems.length === 0) {
+      return (
+        <UiEmptyState
+          title="Nenhum exercício encontrado nesta lista"
+          description="Certifique-se de que a lista de exercícios contém problemas cadastrados no DOMjudge."
+        />
+      );
     }
 
     return (
       <UiStack gap={20}>
         {Array.from(grouped.entries()).map(([probId, subs]) => {
           const prob = probMap.get(probId);
-          const acSub = subs.find((s) => s.judgementType === "AC");
+          const acSubs = subs.filter((s) => s.judgementType === "AC");
+          const uniqueStudentsWithAc = new Set(acSubs.map((s) => s.team_id)).size;
+          const classSize = classFilteredTeams.length || 1;
+          const percentSolved = Math.round((uniqueStudentsWithAc / classSize) * 100);
+          const referenceAc = acSubs[0];
 
           return (
             <UiCard key={probId} variant="default">
               <UiCardHeader
                 action={
-                  <UiBadge variant="brand" size="md">
-                    {subs.length} submissões
-                  </UiBadge>
+                  <UiFlex gap={8} align="center">
+                    <UiBadge variant={percentSolved > 60 ? "success" : percentSolved > 30 ? "warning" : "neutral"} size="md">
+                      {uniqueStudentsWithAc} / {classSize} alunos resolveram ({percentSolved}%)
+                    </UiBadge>
+                    <UiBadge variant="brand" size="md">
+                      {subs.length} submissões
+                    </UiBadge>
+                  </UiFlex>
                 }
               >
                 <UiCardTitle>
-                  <UiFlex gap={8} align="center">
-                    <span className="text-brand font-mono font-bold">{prob?.label || "P"}</span>
+                  <UiFlex gap={10} align="center">
+                    <span className="text-brand font-mono font-bold">{prob?.label || "Ex"}</span>
                     <span>{prob?.name || probId}</span>
                   </UiFlex>
                 </UiCardTitle>
               </UiCardHeader>
 
               <UiCardContent>
-                <UiStack gap={12}>
-                  {subs.map((sub) => {
-                    const student = teamMap.get(sub.team_id);
-                    const isAc = sub.judgementType === "AC";
-                    const cached = codeCache[sub.id];
+                {subs.length === 0 ? (
+                  <p className="text-sm text-muted" style={{ padding: "12px 0" }}>
+                    Nenhum envio registrado para este exercício com os filtros selecionados.
+                  </p>
+                ) : (
+                  <UiStack gap={10}>
+                    {subs.map((sub) => {
+                      const student = teamMap.get(sub.team_id);
+                      const isAc = sub.judgementType === "AC";
 
-                    return (
-                      <UiCard key={sub.id} variant="subtle">
-                        <UiFlex justify="between" align="center" wrap gap={8}>
-                          <UiFlex gap={10} align="center">
-                            <span className="font-bold">{student?.display_name || student?.name || sub.team_id}</span>
+                      return (
+                        <div
+                          key={sub.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "8px 12px",
+                            borderRadius: "var(--radius-md)",
+                            background: "var(--surface-subtle)",
+                            border: "1px solid var(--border-subtle)",
+                          }}
+                        >
+                          <UiFlex gap={12} align="center" wrap>
+                            <span className="font-semibold text-sm">
+                              {student?.display_name || student?.name || sub.team_id}
+                            </span>
                             <UiBadge variant={isAc ? "success" : "danger"} size="sm" dot>
                               {sub.judgementType || "PENDING"}
                             </UiBadge>
@@ -262,30 +373,15 @@ export const ReviewView: React.FC = () => {
                             size="sm"
                             variant="dim"
                             icon={<Code2 size={14} />}
-                            onClick={async () => {
-                              const code = await fetchSource(sub);
-                              setSelectedSubmissionForModal({ ...sub, sourceCode: code });
-                            }}
+                            onClick={() => handleOpenInspectModal(sub)}
                           >
-                            Visualizar Código
+                            Inspecionar Código
                           </UiButton>
-                        </UiFlex>
-
-                        {cached && !selectedSubmissionForModal && (
-                          <div style={{ marginTop: 12 }}>
-                            <UiCodeViewer
-                              code={cached.source}
-                              filename={cached.filename}
-                              language={sub.language_id}
-                              judgementType={sub.judgementType}
-                              compareWithCode={!isAc && acSub && codeCache[acSub.id]?.source ? codeCache[acSub.id].source : undefined}
-                            />
-                          </div>
-                        )}
-                      </UiCard>
-                    );
-                  })}
-                </UiStack>
+                        </div>
+                      );
+                    })}
+                  </UiStack>
+                )}
               </UiCardContent>
             </UiCard>
           );
@@ -294,13 +390,139 @@ export const ReviewView: React.FC = () => {
     );
   };
 
-  // Render Aluno por Vez (Stepper)
-  const renderStepView = () => {
-    if (teams.length === 0) {
-      return <UiEmptyState title="Nenhum estudante disponível" description="Carregue os dados do contest para navegar pelos alunos." />;
+  // Sub-view 2: Por Aluno
+  const renderStudentView = () => {
+    const probMap = new Map(problems.map((p) => [p.id, p]));
+
+    if (filteredTeams.length === 0) {
+      return (
+        <UiEmptyState
+          title="Nenhum aluno encontrado"
+          description="Tente ajustar a busca por nome ou o filtro de turma."
+        />
+      );
     }
 
-    const currentTeam = teams[stepIndex];
+    return (
+      <UiStack gap={16}>
+        {filteredTeams.map((team) => {
+          const studentSubs = submissions.filter((s) => s.team_id === team.id);
+          const solvedSet = new Set(
+            studentSubs.filter((s) => s.judgementType === "AC").map((s) => s.problem_id)
+          );
+          const totalProblems = problems.length || 1;
+          const progressPercent = Math.round((solvedSet.size / totalProblems) * 100);
+
+          return (
+            <UiCard key={team.id} variant="default">
+              <UiCardHeader
+                action={
+                  <UiFlex gap={8} align="center">
+                    <UiBadge
+                      variant={progressPercent === 100 ? "success" : progressPercent > 0 ? "brand" : "neutral"}
+                      size="md"
+                    >
+                      {solvedSet.size} de {totalProblems} resolvidos ({progressPercent}%)
+                    </UiBadge>
+                    <span className="text-xs text-muted">
+                      {studentSubs.length} envios totais
+                    </span>
+                  </UiFlex>
+                }
+              >
+                <UiCardTitle>
+                  <UiFlex gap={8} align="center">
+                    <Users size={18} className="text-brand" />
+                    <span>{team.display_name || team.name}</span>
+                    {team.label && (
+                      <UiBadge variant="outline" size="sm">
+                        {team.label}
+                      </UiBadge>
+                    )}
+                  </UiFlex>
+                </UiCardTitle>
+              </UiCardHeader>
+
+              <UiCardContent>
+                {studentSubs.length === 0 ? (
+                  <p className="text-sm text-muted">Este aluno ainda não enviou soluções para esta lista.</p>
+                ) : (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    {problems.map((prob) => {
+                      const probSubs = studentSubs.filter((s) => s.problem_id === prob.id);
+                      const hasAc = probSubs.some((s) => s.judgementType === "AC");
+                      const latestSub = probSubs[probSubs.length - 1];
+
+                      return (
+                        <div
+                          key={prob.id}
+                          style={{
+                            padding: "10px 12px",
+                            borderRadius: "var(--radius-md)",
+                            background: "var(--surface-subtle)",
+                            border: `1px solid ${hasAc ? "var(--border-success)" : "var(--border-subtle)"}`,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                          }}
+                        >
+                          <div>
+                            <span className="font-semibold text-sm block">
+                              {prob.label ? `${prob.label}. ` : ""}
+                              {prob.name}
+                            </span>
+                            <span className="text-xs text-muted">
+                              {probSubs.length === 0
+                                ? "Não tentou"
+                                : `${probSubs.length} tentativa(s)`}
+                            </span>
+                          </div>
+
+                          {probSubs.length > 0 && latestSub && (
+                            <UiFlex gap={6} align="center">
+                              <UiBadge variant={hasAc ? "success" : "danger"} size="sm">
+                                {hasAc ? "AC" : latestSub.judgementType || "WA"}
+                              </UiBadge>
+                              <UiButton
+                                size="sm"
+                                variant="dim"
+                                icon={<Code2 size={12} />}
+                                onClick={() => handleOpenInspectModal(latestSub)}
+                                title="Ver código"
+                              />
+                            </UiFlex>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </UiCardContent>
+            </UiCard>
+          );
+        })}
+      </UiStack>
+    );
+  };
+
+  // Sub-view 3: Correção Passo a Passo
+  const renderStepView = () => {
+    if (filteredTeams.length === 0) {
+      return (
+        <UiEmptyState
+          title="Nenhum aluno disponível"
+          description="Ajuste os filtros de turma para iniciar a correção guiada."
+        />
+      );
+    }
+
+    const currentTeam = filteredTeams[stepIndex];
     if (!currentTeam) return null;
 
     const studentSubs = submissions.filter((s) => s.team_id === currentTeam.id);
@@ -315,24 +537,33 @@ export const ReviewView: React.FC = () => {
               onClick={() => setStepIndex((prev) => prev - 1)}
               icon={<ChevronLeft size={16} />}
             >
-              Anterior (←)
+              Aluno Anterior (←)
             </UiButton>
 
             <UiStack align="center" gap={4}>
-              <h3 className="font-bold text-lg">{currentTeam.display_name || currentTeam.name}</h3>
-              <span className="text-xs text-muted">
-                Estudante {stepIndex + 1} de {teams.length}
-              </span>
+              <h3 className="font-bold text-lg">
+                {currentTeam.display_name || currentTeam.name}
+              </h3>
+              <UiFlex gap={8} align="center">
+                <span className="text-xs text-muted">
+                  Aluno {stepIndex + 1} de {filteredTeams.length}
+                </span>
+                {currentTeam.label && (
+                  <UiBadge variant="outline" size="sm">
+                    {currentTeam.label}
+                  </UiBadge>
+                )}
+              </UiFlex>
             </UiStack>
 
             <UiButton
               variant="secondary"
-              disabled={stepIndex >= teams.length - 1}
+              disabled={stepIndex >= filteredTeams.length - 1}
               onClick={() => setStepIndex((prev) => prev + 1)}
               icon={<ChevronRight size={16} />}
               iconPosition="right"
             >
-              Próximo (→)
+              Próximo Aluno (→)
             </UiButton>
           </UiFlex>
         </UiCard>
@@ -340,7 +571,7 @@ export const ReviewView: React.FC = () => {
         {studentSubs.length === 0 ? (
           <UiEmptyState
             title="Nenhuma submissão deste aluno"
-            description="Este estudante ainda não enviou soluções para este contest."
+            description="Este estudante ainda não realizou envios para esta lista de exercícios."
           />
         ) : (
           studentSubs.map((sub) => {
@@ -349,13 +580,24 @@ export const ReviewView: React.FC = () => {
 
             return (
               <UiCard key={sub.id} variant="default">
-                <UiCardHeader>
+                <UiCardHeader
+                  action={
+                    <UiBadge
+                      variant={sub.judgementType === "AC" ? "success" : "danger"}
+                      size="md"
+                      dot
+                    >
+                      {sub.judgementType || "PENDING"}
+                    </UiBadge>
+                  }
+                >
                   <UiCardTitle>
                     <UiFlex gap={8} align="center">
+                      <span className="text-brand font-mono font-bold">{prob?.label || "Ex"}</span>
                       <span>{prob?.name || sub.problem_id}</span>
-                      <UiBadge variant={sub.judgementType === "AC" ? "success" : "danger"} size="sm" dot>
-                        {sub.judgementType}
-                      </UiBadge>
+                      <span className="text-xs text-muted font-mono font-normal">
+                        ({sub.language_id})
+                      </span>
                     </UiFlex>
                   </UiCardTitle>
                 </UiCardHeader>
@@ -375,7 +617,7 @@ export const ReviewView: React.FC = () => {
                       onClick={() => fetchSource(sub)}
                       icon={<Code2 size={16} />}
                     >
-                      Carregar Código Fonte
+                      Carregar Código Fonte do Aluno
                     </UiButton>
                   )}
                 </UiCardContent>
@@ -387,25 +629,42 @@ export const ReviewView: React.FC = () => {
     );
   };
 
-  // Render Resumo Geral (Matriz Estudantes x Problemas)
-  const renderSummaryView = () => {
+  // Sub-view 4: Painel da Turma (Matriz Aluno x Exercício)
+  const renderMatrixView = () => {
     const columns: Column<Team>[] = [
       {
         key: "name",
-        title: "Estudante",
-        render: (team) => <span className="font-bold">{team.display_name || team.name}</span>,
+        title: "Aluno",
+        render: (team) => (
+          <div>
+            <span className="font-bold block text-sm">
+              {team.display_name || team.name}
+            </span>
+            {team.label && (
+              <span className="text-xs text-muted">{team.label}</span>
+            )}
+          </div>
+        ),
       },
       ...problems.map((prob) => ({
         key: prob.id,
         title: prob.label || prob.name,
         align: "center" as const,
         render: (team: Team) => {
-          const subs = submissions.filter((s) => s.team_id === team.id && s.problem_id === prob.id);
-          if (subs.length === 0) return <span className="text-muted text-xs">-</span>;
+          const subs = submissions.filter(
+            (s) => s.team_id === team.id && s.problem_id === prob.id
+          );
+          if (subs.length === 0) {
+            return <span className="text-muted text-xs opacity-40">-</span>;
+          }
           const hasAc = subs.some((s) => s.judgementType === "AC");
           return (
-            <UiBadge variant={hasAc ? "success" : "danger"} size="sm">
-              {hasAc ? "AC" : `${subs.length} tentativas`}
+            <UiBadge
+              variant={hasAc ? "success" : "danger"}
+              size="sm"
+              title={`${subs.length} tentativa(s)`}
+            >
+              {hasAc ? "AC" : `${subs.length} tent.`}
             </UiBadge>
           );
         },
@@ -415,12 +674,14 @@ export const ReviewView: React.FC = () => {
     return (
       <UiTable
         columns={columns}
-        data={teams}
+        data={filteredTeams}
         keyField="id"
-        emptyMessage="Nenhum estudante ou problema encontrado."
+        emptyMessage="Nenhum aluno ou exercício encontrado com os filtros selecionados."
       />
     );
   };
+
+  const activeContestObj = contests.find((c) => c.id === selectedContestId);
 
   return (
     <UiStack gap={24} className="animate-fade-in">
@@ -428,9 +689,19 @@ export const ReviewView: React.FC = () => {
       <UiCard variant="glow">
         <UiFlex justify="between" align="center" wrap gap={16}>
           <UiStack gap={4}>
-            <h2 className="text-xl font-bold">Visualização & Review de Submissões</h2>
+            <UiFlex gap={8} align="center">
+              <GraduationCap className="text-brand" size={24} />
+              <h2 className="text-xl font-bold">
+                {activeContestObj ? activeContestObj.name : "Acompanhamento Pedagógico & Entregas"}
+              </h2>
+              {activeContestObj && (
+                <UiBadge variant={activeContestObj.enabled ? "success" : "neutral"} size="sm">
+                  {activeContestObj.enabled ? "Lista Aberta" : "Lista Encerrada"}
+                </UiBadge>
+              )}
+            </UiFlex>
             <p className="text-muted text-sm">
-              Navegue por questão, estudante ou contest. Compare a solução correta (AC) com as demais submissões.
+              Monitore o progresso dos alunos nos exercícios práticos, analise dificuldades recorrentes e inspecione códigos fonte.
             </p>
           </UiStack>
 
@@ -441,7 +712,7 @@ export const ReviewView: React.FC = () => {
               loading={loading}
               icon={<RefreshCw size={16} />}
             >
-              Atualizar Dados
+              Sincronizar Submissões
             </UiButton>
             <UiButton
               variant="dim"
@@ -449,100 +720,141 @@ export const ReviewView: React.FC = () => {
               disabled={filteredSubmissions.length === 0}
               icon={<Download size={16} />}
             >
-              Exportar CSV
-            </UiButton>
-            <UiButton
-              variant="dim"
-              onClick={handleSaveDataset}
-              disabled={filteredSubmissions.length === 0}
-              icon={<Archive size={16} />}
-            >
-              Salvar Dataset (.zip)
+              Exportar Relatório CSV
             </UiButton>
           </UiFlex>
         </UiFlex>
       </UiCard>
 
-      {/* Sub-navegação */}
+      {/* Cartões de Métricas Pedagógicas */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 14,
+        }}
+      >
+        <UiMetricCard
+          title="Alunos na Turma"
+          value={`${metrics.activeStudents} / ${metrics.totalStudents}`}
+          icon={<Users size={20} />}
+          subtitle={`${metrics.activeStudents} já enviaram soluções`}
+        />
+        <UiMetricCard
+          title="Taxa de Conclusão da Lista"
+          value={`${metrics.completionRate}%`}
+          icon={<Award size={20} />}
+          subtitle="Exercícios resolvidos com AC"
+        />
+        <UiMetricCard
+          title="Submissões Avaliadas"
+          value={metrics.totalSubmissionsCount}
+          icon={<Clock size={20} />}
+          subtitle={`${metrics.acRate}% de acerto geral`}
+        />
+      </div>
+
+      {/* Sub-navegação de Modos */}
       <UiTabs
         variant="pill"
         activeTab={viewMode}
         onChange={setViewMode}
         tabs={[
-          { id: "question", label: "Por Questão" },
-          { id: "student", label: "Por Estudante" },
-          { id: "contest", label: "Por Contest" },
-          { id: "step", label: "Aluno por Vez" },
-          { id: "summary", label: "Resumo Geral" },
+          { id: "question", label: "Por Exercício" },
+          { id: "student", label: "Por Aluno" },
+          { id: "step", label: "Correção Passo a Passo" },
+          { id: "matrix", label: "Painel da Turma" },
         ]}
       />
 
-      {/* Grid de Filtros */}
+      {/* Filtros Contextuais */}
       <UiCard variant="subtle">
-        <UiGrid columns={4} gap={14}>
-          <UiSelect
-            label="Contest"
-            options={[
-              { value: "all", label: "Todos os Contests" },
-              ...contests.map((c) => ({ value: c.id, label: c.name })),
-            ]}
-            value={selectedContestIds}
-            onChange={setSelectedContestIds}
-            multiple
+        <UiGrid columns={3} gap={14}>
+          <UiTextInput
+            placeholder="Buscar aluno por nome ou matrícula..."
+            value={studentSearch}
+            onChange={(e) => setStudentSearch(e.target.value)}
+            startIcon={<Search size={16} />}
           />
 
           <UiSelect
-            label="Questão"
+            label="Exercício Específico"
             options={[
-              { value: "all", label: "Todas as Questões" },
-              ...problems.map((p) => ({ value: p.id, label: `${p.label || ""} - ${p.name}` })),
+              { value: "all", label: "Todos os Exercícios" },
+              ...problems.map((p) => ({
+                value: p.id,
+                label: `${p.label ? `${p.label} - ` : ""}${p.name}`,
+              })),
             ]}
-            value={selectedProblemIds}
-            onChange={setSelectedProblemIds}
-            multiple
+            value={selectedProblemId}
+            onChange={(val) => setSelectedProblemId(val as string)}
           />
 
           <UiSelect
-            label="Estudante (Team)"
+            label="Filtrar por Veredito"
             options={[
-              { value: "all", label: "Todos os Estudantes" },
-              ...teams.map((t) => ({ value: t.id, label: t.display_name || t.name })),
+              { value: "all", label: "Todos os Vereditos" },
+              { value: "AC", label: "Accepted (AC)" },
+              { value: "WA", label: "Wrong Answer (WA)" },
+              { value: "TLE", label: "Time Limit (TLE)" },
+              { value: "RTE", label: "Runtime Error (RTE)" },
+              { value: "CE", label: "Compile Error (CE)" },
             ]}
-            value={selectedTeamKey}
-            onChange={setSelectedTeamKey}
-            searchable
-          />
-
-          <UiSelect
-            label="Filtrar por Status"
-            options={[
-              { value: "all", label: "Todos os Status" },
-              { value: "AC", label: "Accepted (AC)", badge: "AC" },
-              { value: "WA", label: "Wrong Answer (WA)", badge: "WA" },
-              { value: "TLE", label: "Time Limit (TLE)", badge: "TLE" },
-              { value: "RTE", label: "Runtime Error (RTE)", badge: "RTE" },
-              { value: "CE", label: "Compile Error (CE)", badge: "CE" },
-            ]}
-            value={selectedStatusIds}
-            onChange={setSelectedStatusIds}
-            multiple
+            value={selectedStatusFilter}
+            onChange={(val) => setSelectedStatusFilter(val as string)}
           />
         </UiGrid>
       </UiCard>
 
-      {/* Conteúdo Dinâmico por Modo */}
+      {/* Conteúdo da Aba */}
       {loading ? (
         <UiCard>
           <UiFlex justify="center" align="center" style={{ padding: 48 }}>
-            <UiSpinner size="lg" label="Carregando submissões da API do DOMjudge..." />
+            <UiSpinner size="lg" label="Carregando submissões e notas do juiz online..." />
           </UiFlex>
         </UiCard>
+      ) : viewMode === "student" ? (
+        renderStudentView()
       ) : viewMode === "step" ? (
         renderStepView()
-      ) : viewMode === "summary" ? (
-        renderSummaryView()
+      ) : viewMode === "matrix" ? (
+        renderMatrixView()
       ) : (
         renderQuestionView()
+      )}
+
+      {/* Modal de Inspeção Detalhada de Código */}
+      {inspectModalSub && (
+        <UiModal
+          isOpen={Boolean(inspectModalSub)}
+          onClose={() => setInspectModalSub(null)}
+          title={`Submissão #${inspectModalSub.id} — ${inspectModalSub.language_id}`}
+          size="lg"
+        >
+          <UiStack gap={14}>
+            <UiFlex justify="between" align="center">
+              <UiFlex gap={8} align="center">
+                <UiBadge
+                  variant={inspectModalSub.judgementType === "AC" ? "success" : "danger"}
+                  size="md"
+                  dot
+                >
+                  {inspectModalSub.judgementType || "PENDING"}
+                </UiBadge>
+                <span className="text-xs text-muted">
+                  Enviado em {new Date(inspectModalSub.time).toLocaleString()}
+                </span>
+              </UiFlex>
+            </UiFlex>
+
+            <UiCodeViewer
+              code={inspectModalCode}
+              filename={`solucao.${inspectModalSub.language_id}`}
+              language={inspectModalSub.language_id}
+              judgementType={inspectModalSub.judgementType}
+            />
+          </UiStack>
+        </UiModal>
       )}
     </UiStack>
   );

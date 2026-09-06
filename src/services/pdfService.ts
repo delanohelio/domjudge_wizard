@@ -1,14 +1,19 @@
-// Serviço de geração e download de PDF com Puppeteer
+import { marked } from "marked";
+import { TestCase } from "@/types/domjudge";
 
 export interface ProblemPdfData {
   title: string;
   problemId: string;
   timeLimit?: number;
   memoryLimit?: number;
-  htmlContent: string;
+  htmlContent?: string;
+  markdownContent?: string;
+  testCases?: TestCase[];
 }
 
 export async function generateProblemPdf(data: ProblemPdfData): Promise<Blob> {
+  const contentHtml = data.htmlContent || (data.markdownContent ? await marked.parse(data.markdownContent) : "");
+
   const fullHtml = `<!doctype html>
 <html lang="pt-br">
 <head>
@@ -106,7 +111,7 @@ export async function generateProblemPdf(data: ProblemPdfData): Promise<Blob> {
     </div>
   </div>
   <div class="content">
-    ${data.htmlContent}
+    ${contentHtml}
   </div>
 </body>
 </html>`;

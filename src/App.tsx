@@ -1,26 +1,21 @@
 import React, { useState, useEffect } from "react";
 import {
-  Zap,
-  BarChart3,
-  PenTool,
-  Trophy,
-  Users,
-  KeyRound,
-  Shield,
-  Lock,
-  LogOut,
+  GraduationCap,
   Sparkles,
-  UserPlus,
+  Shield,
+  KeyRound,
 } from "lucide-react";
 import {
   UiContainer,
-  UiTabs,
   UiFlex,
   UiButton,
   UiBadge,
   UiAlert,
 } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
+import { AppSidebar } from "@/components/layout/AppSidebar";
+import { AppHeader } from "@/components/layout/AppHeader";
+import { CommandPalette } from "@/components/layout/CommandPalette";
 import { ReviewView } from "@/views/ReviewView";
 import { CreatorView } from "@/views/CreatorView";
 import { ContestManagerView } from "@/views/ContestManagerView";
@@ -30,6 +25,7 @@ import { AccessCodesView } from "@/views/AccessCodesView";
 import { LabelPermissionsView } from "@/views/LabelPermissionsView";
 import { RegisterView } from "@/views/RegisterView";
 import { AuthGateModal } from "@/views/AuthGateModal";
+import "@/components/layout/layout.css";
 import "./App.css";
 
 export const App: React.FC = () => {
@@ -64,49 +60,36 @@ export const App: React.FC = () => {
   };
 
   const [standaloneType, setStandaloneType] = useState<StandaloneType>(checkStandaloneType);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("domjudge_sidebar_collapsed") === "true";
+    }
+    return false;
+  });
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState<boolean>(false);
+
+  const toggleSidebarCollapse = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem("domjudge_sidebar_collapsed", String(next));
+      return next;
+    });
+  };
 
   const allNavTabs = [
-    {
-      id: "review",
-      label: "Visualização & Review",
-      icon: <BarChart3 size={16} />,
-    },
-    {
-      id: "creator",
-      label: "Criador de Questões",
-      icon: <PenTool size={16} />,
-    },
-    {
-      id: "contests",
-      label: "Gerenciar Contests",
-      icon: <Trophy size={16} />,
-    },
-    {
-      id: "users",
-      label: "Gerenciar Usuários",
-      icon: <Users size={16} />,
-    },
-    {
-      id: "codes",
-      label: "Códigos de Acesso",
-      icon: <KeyRound size={16} />,
-    },
-    {
-      id: "permissions",
-      label: "Permissões & Labels",
-      icon: <Shield size={16} />,
-    },
-    {
-      id: "trocar-senha",
-      label: "Trocar Senha",
-      icon: <Lock size={16} />,
-    },
+    { id: "review", label: "Acompanhamento & Entregas" },
+    { id: "contests", label: "Listas de Exercícios" },
+    { id: "creator", label: "Studio de Exercícios" },
+    { id: "codes", label: "Inscrições & Turmas" },
+    { id: "users", label: "Alunos Matriculados" },
+    { id: "permissions", label: "Papéis & Permissões" },
+    { id: "trocar-senha", label: "Trocar Senha" },
   ];
 
   // Abas disponíveis para o usuário autenticado
   const allowedNavTabs = allNavTabs.filter((tab) => canAccessPage(tab.id));
 
-  // Ler rota inicial para navegação interna da suíte
+  // Ler rota inicial para navegação interna
   const getInitialTab = (): string => {
     const hash = window.location.hash.replace(/^#/, "");
     if (allNavTabs.some((t) => t.id === hash)) {
@@ -116,6 +99,18 @@ export const App: React.FC = () => {
   };
 
   const [activeTab, setActiveTab] = useState<string>(getInitialTab);
+
+  // Escuta atalho global ⌘K e Ctrl+K para abrir a paleta de comandos
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setIsCommandPaletteOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
 
   useEffect(() => {
     const handleUrlChange = () => {
@@ -167,17 +162,17 @@ export const App: React.FC = () => {
                 style={{ cursor: "pointer" }}
               >
                 <div className="app-brand-icon">
-                  <Zap size={22} className="text-brand fill-brand" />
+                  <GraduationCap size={22} className="text-brand" />
                 </div>
                 <div className="app-brand-text">
-                  <span className="app-brand-title">DOMjudge</span>
-                  <span className="app-brand-tag">Portal do Competidor</span>
+                  <span className="app-brand-title">DOMjudge Edu</span>
+                  <span className="app-brand-tag">Matrícula & Auto-Inscrição</span>
                 </div>
               </div>
 
               <UiFlex gap={8} align="center">
                 <UiBadge variant="brand" size="md">
-                  <Sparkles size={12} /> Inscrição de Alunos
+                  <Sparkles size={12} /> Inscrição na Turma
                 </UiBadge>
                 <UiButton
                   size="sm"
@@ -219,17 +214,17 @@ export const App: React.FC = () => {
                 style={{ cursor: "pointer" }}
               >
                 <div className="app-brand-icon">
-                  <Zap size={22} className="text-brand fill-brand" />
+                  <GraduationCap size={22} className="text-brand" />
                 </div>
                 <div className="app-brand-text">
-                  <span className="app-brand-title">DOMjudge</span>
-                  <span className="app-brand-tag">Portal do Competidor</span>
+                  <span className="app-brand-title">DOMjudge Edu</span>
+                  <span className="app-brand-tag">Segurança da Conta</span>
                 </div>
               </div>
 
               <UiFlex gap={8} align="center">
                 <UiBadge variant="brand" size="md">
-                  <Shield size={12} /> Troca de Senha Autônoma
+                  <Shield size={12} /> Troca de Senha de Aluno
                 </UiBadge>
                 <UiButton
                   size="sm"
@@ -254,103 +249,30 @@ export const App: React.FC = () => {
     );
   }
 
-  // CASO 3: SUÍTE COMPLETA SPA DA PLATAFORMA WIZARD
+  // CASO 3: PLATAFORMA EDU INTEGRADA (SIDEBAR + HEADER + COMMAND PALETTE)
   return (
-    <div className="app-shell">
-      <div className="bg-grid" />
+    <div className="edu-app-layout">
+      {/* Barra Lateral Navegacional Pedagógica */}
+      <AppSidebar
+        activeTab={activeTab}
+        onSelectTab={(tabId) => setActiveTab(tabId)}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={toggleSidebarCollapse}
+      />
 
-      {/* Global Sticky Navbar */}
-      <header className="app-header">
-        <UiContainer maxWidth="xl">
-          <UiFlex justify="between" align="center" wrap gap={16}>
-            {/* Brand Logo */}
-            <div className="app-brand" onClick={() => setActiveTab(allowedNavTabs[0]?.id || "review")}>
-              <div className="app-brand-icon">
-                <Zap size={22} className="text-brand fill-brand" />
-              </div>
-              <div className="app-brand-text">
-                <span className="app-brand-title">DOMjudge Wizard</span>
-                <span className="app-brand-tag">Extensão da Plataforma</span>
-              </div>
-            </div>
+      {/* Invólucro do Conteúdo Principal */}
+      <div className="edu-main-wrapper">
+        {/* Cabeçalho de Contexto Global */}
+        <AppHeader
+          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          onOpenAuthModal={openAuthModal}
+        />
 
-            {/* Navigation Tabs filtradas por permissões */}
-            {allowedNavTabs.length > 0 && (
-              <UiTabs
-                variant="pill"
-                size="md"
-                activeTab={activeTab}
-                onChange={setActiveTab}
-                tabs={allowedNavTabs}
-              />
-            )}
-
-            {/* Session Status & User Controls */}
-            <UiFlex gap={10} align="center">
-              <div className="app-session-pill">
-                <span
-                  className={`app-status-dot ${
-                    isAuthenticated ? (isDemo ? "dot-demo" : "dot-active") : "dot-offline"
-                  }`}
-                />
-                <span className="app-session-user">
-                  {isAuthenticated
-                    ? isDemo
-                      ? "Modo Demo"
-                      : user?.name || user?.username || "Conectado"
-                    : "Desconectado"}
-                </span>
-
-                {user && (
-                  <span
-                    style={{
-                      marginLeft: 4,
-                      fontSize: "0.74rem",
-                      background: user.isAdmin
-                        ? "rgba(239, 68, 68, 0.2)"
-                        : "rgba(99, 102, 241, 0.2)",
-                      color: user.isAdmin ? "var(--danger)" : "var(--brand)",
-                      padding: "2px 6px",
-                      borderRadius: "10px",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {user.isAdmin ? "Admin" : user.labels && user.labels[0] ? user.labels[0] : "Usuário"}
-                  </span>
-                )}
-              </div>
-
-              {isAuthenticated ? (
-                <UiButton
-                  size="sm"
-                  variant="dim"
-                  onClick={logout}
-                  icon={<LogOut size={14} />}
-                  title="Sair da conta"
-                >
-                  Sair
-                </UiButton>
-              ) : (
-                <UiButton
-                  size="sm"
-                  variant="primary"
-                  onClick={openAuthModal}
-                  icon={<KeyRound size={14} />}
-                >
-                  Login DOMjudge
-                </UiButton>
-              )}
-            </UiFlex>
-          </UiFlex>
-        </UiContainer>
-      </header>
-
-      {/* Main Viewport Container */}
-      <main className="app-main">
-        <UiContainer maxWidth="xl">
+        {/* Corpo do Módulo Selecionado */}
+        <main className="edu-content-body">
           {/* Se a aba atual não for permitida para este usuário */}
           {!canAccessPage(activeTab) && (
-            <div style={{ margin: "30px 0" }}>
+            <div style={{ margin: "24px 0" }}>
               <UiAlert variant="warning">
                 Você não possui permissões associadas às suas labels para acessar este módulo.
               </UiAlert>
@@ -364,10 +286,17 @@ export const App: React.FC = () => {
           {activeTab === "codes" && canAccessPage("codes") && <AccessCodesView />}
           {activeTab === "permissions" && canAccessPage("permissions") && <LabelPermissionsView />}
           {activeTab === "trocar-senha" && canAccessPage("trocar-senha") && <ChangePasswordView />}
-        </UiContainer>
-      </main>
+        </main>
+      </div>
 
-      {/* Modal Global de Autenticação */}
+      {/* Paleta Global de Comandos (⌘K) */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onNavigate={(tabId) => setActiveTab(tabId)}
+      />
+
+      {/* Modal Global de Autenticação / Configuração de Juiz */}
       <AuthGateModal />
     </div>
   );

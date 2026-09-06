@@ -9,6 +9,7 @@ export interface ProblemZipData {
   markdownContent: string;
   testCases: TestCase[];
   pdfBlob?: Blob | null;
+  includePdf?: boolean;
 }
 
 export async function createProblemZip(data: ProblemZipData): Promise<Blob> {

@@ -68,6 +68,8 @@ export interface Team {
   organization_id?: string | null;
   affiliation?: string;
   members?: string;
+  label?: string;
+  labels?: string[];
 }
 
 export interface TeamCategory {

@@ -8,6 +8,8 @@ import {
   Clock,
   HardDrive,
   CheckCircle2,
+  Sparkles,
+  BookOpen,
 } from "lucide-react";
 import {
   UiCard,
@@ -19,6 +21,7 @@ import {
   UiGrid,
   UiButton,
   UiTextInput,
+  UiSelect,
   UiCheckbox,
   UiAlert,
   UiBadge,
@@ -26,6 +29,7 @@ import {
 import { UiMarkdownStudio, UiTestCaseCard } from "@/components/domain";
 import { TestCase } from "@/types/domjudge";
 import { useAuth } from "@/context/AuthContext";
+import { useContest } from "@/context/ContestContext";
 import { useToast } from "@/context/ToastContext";
 import { generateProblemPdf } from "@/services/pdfService";
 import { createProblemZip, parseProblemZip } from "@/services/zipService";
@@ -33,10 +37,12 @@ import { DomjudgeApiService } from "@/services/domjudgeApi";
 
 export const CreatorView: React.FC = () => {
   const { credentials } = useAuth();
+  const { contests, selectedContestId } = useContest();
   const { showToast } = useToast();
 
   const [title, setTitle] = useState("Soma de Dois Números");
   const [problemId, setProblemId] = useState("soma-dois-numeros");
+  const [targetContestId, setTargetContestId] = useState<string>(selectedContestId || "");
   const [timeLimit, setTimeLimit] = useState(1.0);
   const [memoryLimit, setMemoryLimit] = useState(524288); // 512 MB
   const [markdown, setMarkdown] = useState(
@@ -75,6 +81,110 @@ export const CreatorView: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Modelos Pedagógicos Rápidos
+  const applyTemplate = (templateKey: string) => {
+    switch (templateKey) {
+      case "condicional":
+        setTitle("Aprovação e Conceito do Aluno");
+        setProblemId("aprovacao-conceito");
+        setMarkdown(
+          `# Aprovação e Conceito do Aluno\n\nEm uma disciplina universitária, um estudante realiza duas avaliações, $N_1$ e $N_2$. A média ponderada é calculada com pesos $2$ e $3$ respectivamente:\n\n$$M = \\frac{2 \\times N_1 + 3 \\times N_2}{5}$$\n\nSe $M \\ge 7.0$, o aluno é **APROVADO**. Se $5.0 \\le M < 7.0$, ele está de **RECUPERACAO**. Caso contrário, é **REPROVADO**.\n\n## Entrada\n\nA entrada consiste em dois números reais $N_1$ e $N_2$ ($0.0 \\le N_1, N_2 \\le 10.0$).\n\n## Saída\n\nImprima a situação do estudante em maiúsculas acompanhada de sua média com duas casas decimais.\n`
+        );
+        setTestCases([
+          {
+            id: "tc-c1",
+            type: "sample",
+            input: "8.0 7.0\n",
+            output: "APROVADO 7.40\n",
+            description: "Aluno aprovado com média 7.40",
+          },
+          {
+            id: "tc-c2",
+            type: "sample",
+            input: "5.0 6.0\n",
+            output: "RECUPERACAO 5.60\n",
+            description: "Aluno em recuperação com média 5.60",
+          },
+          {
+            id: "tc-c3",
+            type: "secret",
+            input: "3.0 4.0\n",
+            output: "REPROVADO 3.60\n",
+            description: "Caso reprovado",
+          },
+        ]);
+        showToast("Modelo pedagógico 'Estruturas Condicionais' aplicado!", "success");
+        break;
+
+      case "repeticao":
+        setTitle("Contagem de Múltiplos e Somatório");
+        setProblemId("multiplos-somatorio");
+        setMarkdown(
+          `# Contagem de Múltiplos e Somatório\n\nDado um número inteiro positivo $N$ e um divisor $K$, calcule quantos números no intervalo $[1, N]$ são múltiplos de $K$ e determine a soma desses múltiplos.\n\n$$\\text{Soma} = \\sum_{i=1, i \\% K = 0}^{N} i$$\n\n## Entrada\n\nA primeira linha contém dois inteiros $N$ e $K$ ($1 \\le K \\le N \\le 10^6$).\n\n## Saída\n\nImprima dois inteiros separados por espaço: a quantidade de múltiplos e a soma total.\n`
+        );
+        setTestCases([
+          {
+            id: "tc-r1",
+            type: "sample",
+            input: "10 3\n",
+            output: "3 18\n",
+            description: "Múltiplos de 3 até 10: 3, 6, 9. Qtd = 3, Soma = 18",
+          },
+          {
+            id: "tc-r2",
+            type: "sample",
+            input: "20 5\n",
+            output: "4 50\n",
+            description: "Múltiplos de 5 até 20: 5, 10, 15, 20. Qtd = 4, Soma = 50",
+          },
+          {
+            id: "tc-r3",
+            type: "secret",
+            input: "1000000 2\n",
+            output: "500000 250000500000\n",
+            description: "Caso de estresse de 64 bits",
+          },
+        ]);
+        showToast("Modelo pedagógico 'Laços de Repetição' aplicado!", "success");
+        break;
+
+      case "vetores":
+        setTitle("Busca e Ocorrência em Vetores");
+        setProblemId("busca-vetor");
+        setMarkdown(
+          `# Busca e Ocorrência em Vetores\n\nDado um vetor de $N$ inteiros e um elemento de consulta $X$, determine a primeira posição (índice 0-indexed) em que $X$ aparece no vetor e o número total de vezes que ele ocorre.\n\nSe $X$ não estiver presente no vetor, a primeira posição deve ser reportada como $-1$ e a frequência como $0$.\n\n## Entrada\n\nA primeira linha contém dois inteiros $N$ e $X$ ($1 \\le N \\le 10^5$).  \nA segunda linha contém os $N$ inteiros do vetor.\n\n## Saída\n\nImprima dois inteiros: o primeiro índice de ocorrência e a quantidade total de ocorrências.\n`
+        );
+        setTestCases([
+          {
+            id: "tc-v1",
+            type: "sample",
+            input: "6 4\n1 4 2 4 8 4\n",
+            output: "1 3\n",
+            description: "Elemento 4 aparece no índice 1 e ocorre 3 vezes",
+          },
+          {
+            id: "tc-v2",
+            type: "sample",
+            input: "4 9\n1 2 3 5\n",
+            output: "-1 0\n",
+            description: "Elemento 9 não existe no vetor",
+          },
+          {
+            id: "tc-v3",
+            type: "secret",
+            input: "1 10\n10\n",
+            output: "0 1\n",
+            description: "Vetor unitário presente",
+          },
+        ]);
+        showToast("Modelo pedagógico 'Vetores e Arrays' aplicado!", "success");
+        break;
+
+      default:
+        break;
+    }
+  };
+
   const handleTitleChange = (val: string) => {
     setTitle(val);
     if (!isEditMode) {
@@ -85,7 +195,7 @@ export const CreatorView: React.FC = () => {
         .replace(/[\u0300-\u036f]/g, "")
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "");
-      setProblemId(slug || "problema");
+      setProblemId(slug || "exercicio");
     }
   };
 
@@ -133,13 +243,14 @@ export const CreatorView: React.FC = () => {
   const handleDownloadPdf = async () => {
     setIsExportingPdf(true);
     try {
-      showToast("Gerando PDF vetorial de alta resolução com Puppeteer...", "info");
+      showToast("Gerando PDF com renderização KaTeX vetorial...", "info");
       const blob = await generateProblemPdf({
         title,
         problemId,
         timeLimit,
         memoryLimit,
-        htmlContent: markdown, // o backend processa o html/markdown
+        markdownContent: markdown,
+        testCases,
       });
 
       const url = URL.createObjectURL(blob);
@@ -150,10 +261,10 @@ export const CreatorView: React.FC = () => {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      showToast("PDF baixado com sucesso!", "success");
+      showToast("PDF gerado com sucesso!", "success");
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || "Falha ao gerar PDF.", "error");
+      showToast("Falha ao gerar o PDF.", "error");
     } finally {
       setIsExportingPdf(false);
     }
@@ -163,22 +274,7 @@ export const CreatorView: React.FC = () => {
   const handleDownloadZip = async () => {
     setIsExportingZip(true);
     try {
-      showToast("Criando pacote ZIP no padrão DOMjudge...", "info");
-      let pdfBlob: Blob | null = null;
-      if (includePdfInZip) {
-        try {
-          pdfBlob = await generateProblemPdf({
-            title,
-            problemId,
-            timeLimit,
-            memoryLimit,
-            htmlContent: markdown,
-          });
-        } catch (pdfErr) {
-          console.warn("PDF não pôde ser gerado para o ZIP, continuando sem ele:", pdfErr);
-        }
-      }
-
+      showToast("Montando pacote ZIP do DOMjudge...", "info");
       const zipBlob = await createProblemZip({
         title,
         problemId,
@@ -186,7 +282,7 @@ export const CreatorView: React.FC = () => {
         memoryLimit,
         markdownContent: markdown,
         testCases,
-        pdfBlob,
+        includePdf: includePdfInZip,
       });
 
       const url = URL.createObjectURL(zipBlob);
@@ -229,11 +325,17 @@ export const CreatorView: React.FC = () => {
     }
   };
 
-  // Enviar direto para o DOMjudge
+  // Enviar direto para a lista no DOMjudge
   const handleSendToDomjudge = async () => {
+    const activeContest = targetContestId || selectedContestId;
+    if (!activeContest) {
+      showToast("Selecione uma lista de exercícios para vincular este problema.", "warning");
+      return;
+    }
+
     setIsUploading(true);
     try {
-      showToast("Gerando pacote e enviando para o DOMjudge...", "info");
+      showToast("Gerando pacote e enviando para a lista de exercícios no DOMjudge...", "info");
       const api = new DomjudgeApiService(credentials);
       const zipBlob = await createProblemZip({
         title,
@@ -244,8 +346,8 @@ export const CreatorView: React.FC = () => {
         testCases,
       });
 
-      await api.uploadProblemZip("fase0-2026", zipBlob);
-      showToast("Problema enviado com sucesso para o DOMjudge!", "success");
+      await api.uploadProblemZip(activeContest, zipBlob);
+      showToast(`Exercício enviado com sucesso para a lista '${activeContest}'!`, "success");
     } catch (err: any) {
       console.error(err);
       showToast(err.message || "Erro no upload do problema.", "error");
@@ -260,9 +362,12 @@ export const CreatorView: React.FC = () => {
       <UiCard variant="glow">
         <UiFlex justify="between" align="center" wrap gap={16}>
           <UiStack gap={4}>
-            <h2 className="text-xl font-bold">Criador de Questões com Markdown Studio</h2>
+            <UiFlex gap={8} align="center">
+              <BookOpen className="text-brand" size={24} />
+              <h2 className="text-xl font-bold">Studio de Exercícios Práticos</h2>
+            </UiFlex>
             <p className="text-muted text-sm">
-              Edite o enunciado com fórmulas matemáticas KaTeX, gerencie casos de teste e exporte em PDF e ZIP DOMjudge.
+              Elabore questões com equações KaTeX, configure casos de teste e exporte diretamente para o DOMjudge ou PDF.
             </p>
           </UiStack>
 
@@ -306,7 +411,41 @@ export const CreatorView: React.FC = () => {
               loading={isUploading}
               icon={<UploadCloud size={16} />}
             >
-              Enviar ao DOMjudge
+              Publicar na Lista
+            </UiButton>
+          </UiFlex>
+        </UiFlex>
+      </UiCard>
+
+      {/* Modelos Pedagógicos Rápidos */}
+      <UiCard variant="subtle">
+        <UiFlex justify="between" align="center" wrap gap={12}>
+          <UiFlex gap={8} align="center">
+            <Sparkles size={16} className="text-brand" />
+            <span className="font-semibold text-sm">Modelos Didáticos Prontos:</span>
+          </UiFlex>
+
+          <UiFlex gap={8} wrap>
+            <UiButton
+              size="sm"
+              variant="dim"
+              onClick={() => applyTemplate("condicional")}
+            >
+              Estruturas Condicionais (if/else)
+            </UiButton>
+            <UiButton
+              size="sm"
+              variant="dim"
+              onClick={() => applyTemplate("repeticao")}
+            >
+              Laços de Repetição & Acúmulo
+            </UiButton>
+            <UiButton
+              size="sm"
+              variant="dim"
+              onClick={() => applyTemplate("vetores")}
+            >
+              Vetores & Busca
             </UiButton>
           </UiFlex>
         </UiFlex>
@@ -315,13 +454,13 @@ export const CreatorView: React.FC = () => {
       {/* Metadados do Problema */}
       <UiCard variant="default">
         <UiCardHeader>
-          <UiCardTitle>Configurações e Limites do Problema</UiCardTitle>
+          <UiCardTitle>Configurações e Parâmetros Acadêmicos</UiCardTitle>
         </UiCardHeader>
 
         <UiCardContent>
           <UiGrid columns={4} gap={16}>
             <UiTextInput
-              label="Nome do Problema"
+              label="Nome do Exercício"
               value={title}
               onChange={(e) => handleTitleChange(e.target.value)}
               placeholder="Ex: Árvore Binária Balanceada"
@@ -329,7 +468,7 @@ export const CreatorView: React.FC = () => {
             />
 
             <UiTextInput
-              label="Identificador (Problem ID / Slug)"
+              label="Slug / Identificador"
               value={problemId}
               onChange={(e) => setProblemId(e.target.value)}
               placeholder="ex: arvore-balanceada"
@@ -349,15 +488,17 @@ export const CreatorView: React.FC = () => {
               startIcon={<Clock size={16} />}
             />
 
-            <UiTextInput
-              label="Limite de Memória (KB)"
-              type="number"
-              step="1024"
-              min="16384"
-              value={memoryLimit}
-              onChange={(e) => setMemoryLimit(parseInt(e.target.value, 10) || 524288)}
-              helperText={`Aprox. ${Math.round(memoryLimit / 1024)} MB`}
-              startIcon={<HardDrive size={16} />}
+            <UiSelect
+              label="Vincular à Lista de Exercícios"
+              options={[
+                { value: "", label: "Nenhuma lista selecionada" },
+                ...contests.map((c) => ({
+                  value: c.id,
+                  label: `${c.name} (${c.id})`,
+                })),
+              ]}
+              value={targetContestId || selectedContestId || ""}
+              onChange={(val) => setTargetContestId(val as string)}
             />
           </UiGrid>
 
@@ -365,7 +506,7 @@ export const CreatorView: React.FC = () => {
             <UiCheckbox
               checked={isEditMode}
               onChange={(e) => setIsEditMode(e.target.checked)}
-              label="Personalizar ID da questão manualmente"
+              label="Personalizar slug da questão manualmente"
             />
             <UiCheckbox
               checked={includePdfInZip}
@@ -379,7 +520,7 @@ export const CreatorView: React.FC = () => {
       {/* Markdown Studio */}
       <UiCard variant="default">
         <UiCardHeader>
-          <UiCardTitle>Enunciado do Problema (Markdown Studio)</UiCardTitle>
+          <UiCardTitle>Enunciado do Problema (Markdown Studio com KaTeX)</UiCardTitle>
         </UiCardHeader>
         <UiCardContent>
           <UiMarkdownStudio
@@ -401,7 +542,7 @@ export const CreatorView: React.FC = () => {
                 onClick={() => handleAddTest("sample")}
                 icon={<Plus size={14} />}
               >
-                + Adicionar Sample (Público)
+                + Exemplo Público (Sample)
               </UiButton>
               <UiButton
                 size="sm"
@@ -409,16 +550,16 @@ export const CreatorView: React.FC = () => {
                 onClick={() => handleAddTest("secret")}
                 icon={<Plus size={14} />}
               >
-                + Adicionar Secret (Oculto)
+                + Caso Oculto de Avaliação (Secret)
               </UiButton>
             </UiFlex>
           }
         >
           <UiCardTitle>
             <UiFlex gap={8} align="center">
-              <span>Casos de Teste (Samples & Secrets)</span>
+              <span>Casos de Teste Acadêmicos</span>
               <UiBadge variant="brand" size="sm">
-                {testCases.length} testes
+                {testCases.length} testes configurados
               </UiBadge>
             </UiFlex>
           </UiCardTitle>

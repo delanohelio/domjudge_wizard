@@ -10,7 +10,13 @@ export default defineConfig({
       configureServer(server) {
         server.middlewares.use((req, _res, next) => {
           const url = req.url ? req.url.split("?")[0] : "";
-          if (url === "/trocar-senha" || url === "/change-password") {
+          if (
+            url === "/trocar-senha" ||
+            url === "/change-password" ||
+            url === "/cadastro" ||
+            url === "/register" ||
+            url === "/criar-conta"
+          ) {
             req.url = "/index.html";
           }
           next();
