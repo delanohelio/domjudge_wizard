@@ -16,7 +16,10 @@ services:
       - DOMJUDGE_API_PASSWORD=${DOMJUDGE_API_PASSWORD:-}
       - DOMJUDGE_ADMIN_USER=${DOMJUDGE_ADMIN_USER:-}
       - DOMJUDGE_ADMIN_PASSWORD=${DOMJUDGE_ADMIN_PASSWORD:-}
+      - WIZARD_ADMIN_LABEL=${WIZARD_ADMIN_LABEL:-admin}
       - STORAGE_EXPIRATION_DAYS=${STORAGE_EXPIRATION_DAYS:-7}
+    volumes:
+      - ./data:/app/data
     env_file:
       - path: .env
         required: false

@@ -15,8 +15,26 @@ export class DomjudgeApiService {
     this.creds = creds;
   }
 
-  private getAuthHeader(): string {
-    return `Basic ${btoa(`${this.creds.user}:${this.creds.password || ""}`)}`;
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (this.creds.user && this.creds.password) {
+      headers["Authorization"] = `Basic ${btoa(`${this.creds.user}:${this.creds.password}`)}`;
+    }
+    try {
+      const sessionRaw =
+        localStorage.getItem("domjudge_wizard_auth_v2") ||
+        sessionStorage.getItem("domjudge_wizard_auth_v2");
+      if (sessionRaw) {
+        const parsed = JSON.parse(sessionRaw);
+        if (parsed.token) {
+          headers["X-Session-Token"] = parsed.token;
+          if (!headers["Authorization"]) {
+            headers["Authorization"] = `Bearer ${parsed.token}`;
+          }
+        }
+      }
+    } catch (e) {}
+    return headers;
   }
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -27,8 +45,8 @@ export class DomjudgeApiService {
     const cleanPath = path.startsWith("/") ? path : `/${path}`;
     const url = `${this.creds.apiBase}${cleanPath}`;
     const headers = {
-      Authorization: this.getAuthHeader(),
       Accept: "application/json",
+      ...this.getAuthHeaders(),
       ...options.headers,
     };
 
@@ -124,7 +142,7 @@ export class DomjudgeApiService {
     const res = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: this.getAuthHeader(),
+        ...this.getAuthHeaders(),
       },
       body: fd,
     });
@@ -149,7 +167,7 @@ export class DomjudgeApiService {
     const res = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: this.getAuthHeader(),
+        ...this.getAuthHeaders(),
       },
       body: fd,
     });

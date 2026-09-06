@@ -1,0 +1,47 @@
+[
+  {
+    "label": "admin",
+    "description": "Administradores do Wizard (Acesso Total)",
+    "allowedPages": [
+      "review",
+      "creator",
+      "contests",
+      "users",
+      "codes",
+      "permissions",
+      "trocar-senha"
+    ],
+    "isAdmin": true
+  },
+  {
+    "label": "professor",
+    "description": "Professores e Coordenadores",
+    "allowedPages": [
+      "review",
+      "creator",
+      "contests",
+      "users",
+      "codes",
+      "trocar-senha"
+    ],
+    "isAdmin": false
+  },
+  {
+    "label": "monitor",
+    "description": "Monitores da Disciplina",
+    "allowedPages": [
+      "review",
+      "creator",
+      "trocar-senha"
+    ],
+    "isAdmin": false
+  },
+  {
+    "label": "aluno",
+    "description": "Alunos / Competidores",
+    "allowedPages": [
+      "trocar-senha"
+    ],
+    "isAdmin": false
+  }
+]

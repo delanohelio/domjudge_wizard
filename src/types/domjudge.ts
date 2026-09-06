@@ -125,3 +125,54 @@ export interface ToastMessage {
   message: string;
   duration?: number;
 }
+
+export interface AccessCode {
+  id: string;
+  code: string;
+  name: string;
+  labels: string[];
+  category?: string;
+  roles?: string[];
+  active: boolean;
+  createdAt: string;
+  usageCount: number;
+  maxUses?: number | null;
+}
+
+export interface LabelPermission {
+  label: string;
+  description?: string;
+  allowedPages: string[];
+  isAdmin: boolean;
+}
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  name: string;
+  email?: string | null;
+  roles: string[];
+  team_id?: string | null;
+  labels: string[];
+  isAdmin: boolean;
+  allowedPages: string[];
+}
+
+export interface LoginResponse {
+  success: boolean;
+  token?: string;
+  user?: AuthUser;
+  error?: string;
+  detectedLabels?: string[];
+  roles?: string[];
+}
+
+export interface ValidateCodeResponse {
+  success: boolean;
+  active?: boolean;
+  code?: string;
+  name?: string;
+  labels?: string[];
+  category?: string;
+  error?: string;
+}

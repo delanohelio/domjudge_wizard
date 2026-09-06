@@ -1,0 +1,33 @@
+[
+  {
+    "id": "code_demo_1",
+    "code": "TURMA-2026-1",
+    "name": "Turma 2026.1 - Algoritmos e Programação",
+    "labels": [
+      "turma-2026-1",
+      "aluno"
+    ],
+    "category": "Participants",
+    "roles": [
+      "team"
+    ],
+    "active": true,
+    "createdAt": "2026-09-06T18:11:39.760Z",
+    "usageCount": 0
+  },
+  {
+    "id": "code_demo_2",
+    "code": "MONITORES-2026",
+    "name": "Equipe de Monitoria 2026.1",
+    "labels": [
+      "monitor"
+    ],
+    "category": "Professores / Jury",
+    "roles": [
+      "jury"
+    ],
+    "active": true,
+    "createdAt": "2026-09-06T18:11:39.760Z",
+    "usageCount": 0
+  }
+]

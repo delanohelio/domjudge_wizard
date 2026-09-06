@@ -6,8 +6,11 @@ import {
   Trophy,
   Users,
   KeyRound,
-  Settings,
   Shield,
+  Lock,
+  LogOut,
+  Sparkles,
+  UserPlus,
 } from "lucide-react";
 import {
   UiContainer,
@@ -15,6 +18,7 @@ import {
   UiFlex,
   UiButton,
   UiBadge,
+  UiAlert,
 } from "@/components/ui";
 import { useAuth } from "@/context/AuthContext";
 import { ReviewView } from "@/views/ReviewView";
@@ -22,63 +26,46 @@ import { CreatorView } from "@/views/CreatorView";
 import { ContestManagerView } from "@/views/ContestManagerView";
 import { UserManagerView } from "@/views/UserManagerView";
 import { ChangePasswordView } from "@/views/ChangePasswordView";
+import { AccessCodesView } from "@/views/AccessCodesView";
+import { LabelPermissionsView } from "@/views/LabelPermissionsView";
+import { RegisterView } from "@/views/RegisterView";
 import { AuthGateModal } from "@/views/AuthGateModal";
 import "./App.css";
 
 export const App: React.FC = () => {
-  const { credentials, isAuthenticated, isDemo, openAuthModal } = useAuth();
+  const { user, isAuthenticated, isDemo, logout, openAuthModal, canAccessPage } = useAuth();
 
-  const checkIsStandalone = (): boolean => {
-    if (typeof window === "undefined") return false;
+  type StandaloneType = "password" | "register" | null;
+
+  const checkStandaloneType = (): StandaloneType => {
+    if (typeof window === "undefined") return null;
     const path = window.location.pathname.toLowerCase();
     const hash = window.location.hash.toLowerCase();
-    // Se acessou diretamente a rota /trocar-senha ou /change-password
-    if (path === "/trocar-senha" || path === "/change-password") return true;
-    // Se acessou via hash e não está autenticado
-    if ((hash === "#trocar-senha" || hash === "#change-password") && !isAuthenticated) return true;
-    return false;
+
+    if (
+      path === "/cadastro" ||
+      path === "/register" ||
+      path === "/criar-conta" ||
+      hash === "#cadastro" ||
+      hash === "#register"
+    ) {
+      return "register";
+    }
+
+    if (
+      path === "/trocar-senha" ||
+      path === "/change-password" ||
+      ((hash === "#trocar-senha" || hash === "#change-password") && !isAuthenticated)
+    ) {
+      return "password";
+    }
+
+    return null;
   };
 
-  const [isStandalone, setIsStandalone] = useState<boolean>(checkIsStandalone);
+  const [standaloneType, setStandaloneType] = useState<StandaloneType>(checkStandaloneType);
 
-  // Ler rota inicial para navegação interna da suíte
-  const getInitialTab = (): string => {
-    const hash = window.location.hash.replace(/^#/, "");
-    if (["review", "creator", "contests", "users", "trocar-senha"].includes(hash)) {
-      return hash;
-    }
-    return "review";
-  };
-
-  const [activeTab, setActiveTab] = useState<string>(getInitialTab);
-
-  useEffect(() => {
-    const handleUrlChange = () => {
-      const standalone = checkIsStandalone();
-      setIsStandalone(standalone);
-
-      const hash = window.location.hash.replace(/^#/, "");
-      if (["review", "creator", "contests", "users", "trocar-senha"].includes(hash)) {
-        setActiveTab(hash);
-      }
-    };
-
-    window.addEventListener("hashchange", handleUrlChange);
-    window.addEventListener("popstate", handleUrlChange);
-    return () => {
-      window.removeEventListener("hashchange", handleUrlChange);
-      window.removeEventListener("popstate", handleUrlChange);
-    };
-  }, [isAuthenticated]);
-
-  // Sincronizar hash ao trocar de aba se não for standalone
-  useEffect(() => {
-    if (!isStandalone) {
-      window.location.hash = activeTab;
-    }
-  }, [activeTab, isStandalone]);
-
-  const navTabs = [
+  const allNavTabs = [
     {
       id: "review",
       label: "Visualização & Review",
@@ -100,23 +87,137 @@ export const App: React.FC = () => {
       icon: <Users size={16} />,
     },
     {
+      id: "codes",
+      label: "Códigos de Acesso",
+      icon: <KeyRound size={16} />,
+    },
+    {
+      id: "permissions",
+      label: "Permissões & Labels",
+      icon: <Shield size={16} />,
+    },
+    {
       id: "trocar-senha",
       label: "Trocar Senha",
-      icon: <KeyRound size={16} />,
+      icon: <Lock size={16} />,
     },
   ];
 
-  // Caso 1: ROTA INDEPENDENTE / STANDALONE (Para competidores e alunos comuns)
-  if (isStandalone) {
+  // Abas disponíveis para o usuário autenticado
+  const allowedNavTabs = allNavTabs.filter((tab) => canAccessPage(tab.id));
+
+  // Ler rota inicial para navegação interna da suíte
+  const getInitialTab = (): string => {
+    const hash = window.location.hash.replace(/^#/, "");
+    if (allNavTabs.some((t) => t.id === hash)) {
+      return hash;
+    }
+    return allowedNavTabs[0]?.id || "review";
+  };
+
+  const [activeTab, setActiveTab] = useState<string>(getInitialTab);
+
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const type = checkStandaloneType();
+      setStandaloneType(type);
+
+      const hash = window.location.hash.replace(/^#/, "");
+      if (allNavTabs.some((t) => t.id === hash)) {
+        setActiveTab(hash);
+      }
+    };
+
+    window.addEventListener("hashchange", handleUrlChange);
+    window.addEventListener("popstate", handleUrlChange);
+    return () => {
+      window.removeEventListener("hashchange", handleUrlChange);
+      window.removeEventListener("popstate", handleUrlChange);
+    };
+  }, [isAuthenticated]);
+
+  // Se a aba ativa atual não for permitida, redirecionar para a primeira permitida
+  useEffect(() => {
+    if (allowedNavTabs.length > 0 && !canAccessPage(activeTab)) {
+      setActiveTab(allowedNavTabs[0].id);
+    }
+  }, [user, isDemo]);
+
+  // Sincronizar hash ao trocar de aba se não for standalone
+  useEffect(() => {
+    if (!standaloneType) {
+      window.location.hash = activeTab;
+    }
+  }, [activeTab, standaloneType]);
+
+  // CASO 1: ROTA AUTÔNOMA DE REGISTRO COM CÓDIGO DE ACESSO (/cadastro)
+  if (standaloneType === "register") {
     return (
       <div className="app-shell">
         <div className="bg-grid" />
-
-        {/* Header Exclusivo e Isolado para Troca de Senha */}
         <header className="app-header app-header-standalone">
           <UiContainer maxWidth="md">
             <UiFlex justify="between" align="center" wrap gap={12}>
-              <div className="app-brand">
+              <div
+                className="app-brand"
+                onClick={() => {
+                  window.location.hash = "#review";
+                  setStandaloneType(null);
+                }}
+                style={{ cursor: "pointer" }}
+              >
+                <div className="app-brand-icon">
+                  <Zap size={22} className="text-brand fill-brand" />
+                </div>
+                <div className="app-brand-text">
+                  <span className="app-brand-title">DOMjudge</span>
+                  <span className="app-brand-tag">Portal do Competidor</span>
+                </div>
+              </div>
+
+              <UiFlex gap={8} align="center">
+                <UiBadge variant="brand" size="md">
+                  <Sparkles size={12} /> Inscrição de Alunos
+                </UiBadge>
+                <UiButton
+                  size="sm"
+                  variant="dim"
+                  onClick={() => {
+                    window.location.hash = "#review";
+                    setStandaloneType(null);
+                    openAuthModal();
+                  }}
+                >
+                  Entrar
+                </UiButton>
+              </UiFlex>
+            </UiFlex>
+          </UiContainer>
+        </header>
+
+        <main className="app-main">
+          <RegisterView />
+        </main>
+      </div>
+    );
+  }
+
+  // CASO 2: ROTA AUTÔNOMA DE TROCA DE SENHA (/trocar-senha)
+  if (standaloneType === "password") {
+    return (
+      <div className="app-shell">
+        <div className="bg-grid" />
+        <header className="app-header app-header-standalone">
+          <UiContainer maxWidth="md">
+            <UiFlex justify="between" align="center" wrap gap={12}>
+              <div
+                className="app-brand"
+                onClick={() => {
+                  window.location.hash = "#review";
+                  setStandaloneType(null);
+                }}
+                style={{ cursor: "pointer" }}
+              >
                 <div className="app-brand-icon">
                   <Zap size={22} className="text-brand fill-brand" />
                 </div>
@@ -130,12 +231,22 @@ export const App: React.FC = () => {
                 <UiBadge variant="brand" size="md">
                   <Shield size={12} /> Troca de Senha Autônoma
                 </UiBadge>
+                <UiButton
+                  size="sm"
+                  variant="dim"
+                  onClick={() => {
+                    window.location.hash = "#review";
+                    setStandaloneType(null);
+                    openAuthModal();
+                  }}
+                >
+                  Entrar
+                </UiButton>
               </UiFlex>
             </UiFlex>
           </UiContainer>
         </header>
 
-        {/* View Isolada sem nada do restante do sistema */}
         <main className="app-main">
           <ChangePasswordView />
         </main>
@@ -143,7 +254,7 @@ export const App: React.FC = () => {
     );
   }
 
-  // Caso 2: SUÍTE COMPLETA SPA (Para jurados, professores e administradores)
+  // CASO 3: SUÍTE COMPLETA SPA DA PLATAFORMA WIZARD
   return (
     <div className="app-shell">
       <div className="bg-grid" />
@@ -153,26 +264,28 @@ export const App: React.FC = () => {
         <UiContainer maxWidth="xl">
           <UiFlex justify="between" align="center" wrap gap={16}>
             {/* Brand Logo */}
-            <div className="app-brand" onClick={() => setActiveTab("review")}>
+            <div className="app-brand" onClick={() => setActiveTab(allowedNavTabs[0]?.id || "review")}>
               <div className="app-brand-icon">
                 <Zap size={22} className="text-brand fill-brand" />
               </div>
               <div className="app-brand-text">
                 <span className="app-brand-title">DOMjudge Wizard</span>
-                <span className="app-brand-tag">Competitive Suite</span>
+                <span className="app-brand-tag">Extensão da Plataforma</span>
               </div>
             </div>
 
-            {/* Navigation Tabs */}
-            <UiTabs
-              variant="pill"
-              size="md"
-              activeTab={activeTab}
-              onChange={setActiveTab}
-              tabs={navTabs}
-            />
+            {/* Navigation Tabs filtradas por permissões */}
+            {allowedNavTabs.length > 0 && (
+              <UiTabs
+                variant="pill"
+                size="md"
+                activeTab={activeTab}
+                onChange={setActiveTab}
+                tabs={allowedNavTabs}
+              />
+            )}
 
-            {/* Session Status & Auth Gate Trigger */}
+            {/* Session Status & User Controls */}
             <UiFlex gap={10} align="center">
               <div className="app-session-pill">
                 <span
@@ -184,19 +297,49 @@ export const App: React.FC = () => {
                   {isAuthenticated
                     ? isDemo
                       ? "Modo Demo"
-                      : credentials.user || "Conectado"
+                      : user?.name || user?.username || "Conectado"
                     : "Desconectado"}
                 </span>
+
+                {user && (
+                  <span
+                    style={{
+                      marginLeft: 4,
+                      fontSize: "0.74rem",
+                      background: user.isAdmin
+                        ? "rgba(239, 68, 68, 0.2)"
+                        : "rgba(99, 102, 241, 0.2)",
+                      color: user.isAdmin ? "var(--danger)" : "var(--brand)",
+                      padding: "2px 6px",
+                      borderRadius: "10px",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {user.isAdmin ? "Admin" : user.labels && user.labels[0] ? user.labels[0] : "Usuário"}
+                  </span>
+                )}
               </div>
 
-              <UiButton
-                size="sm"
-                variant="dim"
-                onClick={openAuthModal}
-                icon={<Settings size={14} />}
-              >
-                Conexão
-              </UiButton>
+              {isAuthenticated ? (
+                <UiButton
+                  size="sm"
+                  variant="dim"
+                  onClick={logout}
+                  icon={<LogOut size={14} />}
+                  title="Sair da conta"
+                >
+                  Sair
+                </UiButton>
+              ) : (
+                <UiButton
+                  size="sm"
+                  variant="primary"
+                  onClick={openAuthModal}
+                  icon={<KeyRound size={14} />}
+                >
+                  Login DOMjudge
+                </UiButton>
+              )}
             </UiFlex>
           </UiFlex>
         </UiContainer>
@@ -205,11 +348,22 @@ export const App: React.FC = () => {
       {/* Main Viewport Container */}
       <main className="app-main">
         <UiContainer maxWidth="xl">
-          {activeTab === "review" && <ReviewView />}
-          {activeTab === "creator" && <CreatorView />}
-          {activeTab === "contests" && <ContestManagerView />}
-          {activeTab === "users" && <UserManagerView />}
-          {activeTab === "trocar-senha" && <ChangePasswordView />}
+          {/* Se a aba atual não for permitida para este usuário */}
+          {!canAccessPage(activeTab) && (
+            <div style={{ margin: "30px 0" }}>
+              <UiAlert variant="warning">
+                Você não possui permissões associadas às suas labels para acessar este módulo.
+              </UiAlert>
+            </div>
+          )}
+
+          {activeTab === "review" && canAccessPage("review") && <ReviewView />}
+          {activeTab === "creator" && canAccessPage("creator") && <CreatorView />}
+          {activeTab === "contests" && canAccessPage("contests") && <ContestManagerView />}
+          {activeTab === "users" && canAccessPage("users") && <UserManagerView />}
+          {activeTab === "codes" && canAccessPage("codes") && <AccessCodesView />}
+          {activeTab === "permissions" && canAccessPage("permissions") && <LabelPermissionsView />}
+          {activeTab === "trocar-senha" && canAccessPage("trocar-senha") && <ChangePasswordView />}
         </UiContainer>
       </main>
 
