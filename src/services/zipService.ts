@@ -29,12 +29,17 @@ color = '#6366f1'
 `;
   zip.file("domjudge-problem.ini", iniContent);
 
-  // 3. problem.pdf (se fornecido)
+  // 3. statement.md
+  if (data.markdownContent) {
+    zip.file("statement.md", data.markdownContent);
+  }
+
+  // 4. problem.pdf (se fornecido)
   if (data.pdfBlob) {
     zip.file("problem.pdf", data.pdfBlob);
   }
 
-  // 4. Casos de Teste (data/sample e data/secret)
+  // 5. Casos de Teste (data/sample e data/secret)
   const sampleFolder = zip.folder("data/sample");
   const secretFolder = zip.folder("data/secret");
 
@@ -56,19 +61,54 @@ color = '#6366f1'
   return zip.generateAsync({ type: "blob" });
 }
 
-export async function parseProblemZip(file: File): Promise<{
+export interface ParsedProblemZip {
   title?: string;
   timeLimit?: number;
   memoryLimit?: number;
+  markdownContent?: string;
   testCases: TestCase[];
-}> {
+}
+
+export async function parseProblemZip(file: File): Promise<ParsedProblemZip> {
   const zip = await JSZip.loadAsync(file);
   const testCases: TestCase[] = [];
   let title: string | undefined;
   let timeLimit: number | undefined;
   let memoryLimit: number | undefined;
+  let markdownContent: string | undefined;
 
-  // 1. Ler problem.yaml se existir
+  const allFiles = Object.keys(zip.files);
+
+  // 1. Procurar statement.md ou similar (ignorando problem.html e outros formatos)
+  const statementCandidates = allFiles.filter((f) => {
+    const lower = f.toLowerCase();
+    return (
+      !lower.startsWith("__macosx") &&
+      (lower.endsWith("statement.md") ||
+        lower.endsWith("problem.md") ||
+        lower.endsWith("description.md") ||
+        (lower.endsWith(".md") &&
+          !lower.includes("readme") &&
+          !lower.includes("solution") &&
+          !lower.includes("editorial")))
+    );
+  });
+
+  // Priorizar arquivos chamados statement.md
+  statementCandidates.sort((a, b) => {
+    const aIsStatement = a.toLowerCase().includes("statement.md") ? -1 : 1;
+    const bIsStatement = b.toLowerCase().includes("statement.md") ? -1 : 1;
+    return aIsStatement - bIsStatement;
+  });
+
+  if (statementCandidates.length > 0) {
+    const mdFile = zip.file(statementCandidates[0]);
+    if (mdFile) {
+      markdownContent = await mdFile.async("string");
+    }
+  }
+
+  // 2. Ler problem.yaml se existir
   const yamlFile = zip.file("problem.yaml");
   if (yamlFile) {
     const text = await yamlFile.async("string");
@@ -82,7 +122,7 @@ export async function parseProblemZip(file: File): Promise<{
     if (memMatch) memoryLimit = parseInt(memMatch[1], 10) * 1024;
   }
 
-  // 2. Ler domjudge-problem.ini se YAML não tiver
+  // 3. Ler domjudge-problem.ini se YAML não tiver
   const iniFile = zip.file("domjudge-problem.ini");
   if (iniFile && !timeLimit) {
     const text = await iniFile.async("string");
@@ -90,19 +130,34 @@ export async function parseProblemZip(file: File): Promise<{
     if (timeMatch) timeLimit = parseFloat(timeMatch[1]);
   }
 
-  // 3. Ler data/sample e data/secret
-  const files = Object.keys(zip.files);
-  const inFiles = files.filter((f) => f.match(/^data\/(sample|secret)\/.*\.in$/));
+  // Se o título não veio do problem.yaml, inferir do primeiro cabeçalho # do markdown
+  if (!title && markdownContent) {
+    const titleMatch = markdownContent.match(/^#\s+([^\n]+)/m);
+    if (titleMatch) {
+      title = titleMatch[1].trim();
+    }
+  }
+
+  // 4. Ler data/sample e data/secret (ordenando numericamente de forma natural)
+  // Ignora explicitamente outros arquivos como problem.html, problem.pdf, solutions, etc.
+  const inFiles = allFiles
+    .filter((f) => !f.startsWith("__MACOSX") && f.match(/^data\/(sample|secret)\/.*\.in$/i))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
 
   for (const inFile of inFiles) {
-    const isSample = inFile.includes("/sample/");
-    const baseName = inFile.replace(/\.in$/, "");
-    const ansFile = `${baseName}.ans`;
-    const descFile = `${baseName}.desc`;
+    const isSample = inFile.toLowerCase().includes("/sample/");
+    const baseName = inFile.replace(/\.in$/i, "");
 
-    const input = await zip.file(inFile)?.async("string") || "";
-    const output = (zip.file(ansFile) ? await zip.file(ansFile)?.async("string") : "") || "";
-    const description = (zip.file(descFile) ? await zip.file(descFile)?.async("string") : "") || "";
+    const ansKey = allFiles.find(
+      (f) =>
+        f.toLowerCase() === `${baseName.toLowerCase()}.ans` ||
+        f.toLowerCase() === `${baseName.toLowerCase()}.out`
+    );
+    const descKey = allFiles.find((f) => f.toLowerCase() === `${baseName.toLowerCase()}.desc`);
+
+    const input = (await zip.file(inFile)?.async("string")) || "";
+    const output = (ansKey && (await zip.file(ansKey)?.async("string"))) || "";
+    const description = (descKey && (await zip.file(descKey)?.async("string"))) || "";
 
     testCases.push({
       id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -113,5 +168,5 @@ export async function parseProblemZip(file: File): Promise<{
     });
   }
 
-  return { title, timeLimit, memoryLimit, testCases };
+  return { title, timeLimit, memoryLimit, markdownContent, testCases };
 }

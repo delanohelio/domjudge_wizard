@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import ReactDOM from "react-dom";
 import { ChevronDown, Check, X } from "lucide-react";
 import "./ui.css";
 
@@ -26,6 +27,13 @@ export interface UiSelectProps {
   id?: string;
 }
 
+interface DropdownPosition {
+  top: number;
+  left: number;
+  width: number;
+  placement: "bottom" | "top";
+}
+
 export const UiSelect: React.FC<UiSelectProps> = ({
   label,
   helperText,
@@ -44,7 +52,9 @@ export const UiSelect: React.FC<UiSelectProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [dropdownPosition, setDropdownPosition] = useState<DropdownPosition | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const selectedValues = Array.isArray(value)
     ? value
@@ -52,9 +62,45 @@ export const UiSelect: React.FC<UiSelectProps> = ({
     ? [String(value)]
     : [];
 
+  const updateDropdownPosition = () => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const dropdownEstimatedHeight = Math.min(options.length * 40 + 60, 280);
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const placeAbove = spaceBelow < dropdownEstimatedHeight && rect.top > dropdownEstimatedHeight;
+
+    setDropdownPosition({
+      top: placeAbove ? rect.top - 4 : rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+      placement: placeAbove ? "top" : "bottom",
+    });
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      updateDropdownPosition();
+      const handleScrollOrResize = () => {
+        updateDropdownPosition();
+      };
+      window.addEventListener("resize", handleScrollOrResize);
+      window.addEventListener("scroll", handleScrollOrResize, true);
+      return () => {
+        window.removeEventListener("resize", handleScrollOrResize);
+        window.removeEventListener("scroll", handleScrollOrResize, true);
+      };
+    }
+  }, [isOpen, options.length]);
+
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(target) &&
+        dropdownRef.current &&
+        !dropdownRef.current.contains(target)
+      ) {
         setIsOpen(false);
       }
     }
@@ -154,50 +200,70 @@ export const UiSelect: React.FC<UiSelectProps> = ({
         </div>
       </div>
 
-      {isOpen && (
-        <div className="ui-select-dropdown animate-fade-in">
-          {(searchable || options.length > 7) && (
-            <div className="ui-select-search-box" onClick={(e) => e.stopPropagation()}>
-              <input
-                type="text"
-                className="ui-select-search-input"
-                placeholder="Buscar opções..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                autoFocus
-              />
-            </div>
-          )}
-
-          <div className="ui-select-options-list">
-            {filteredOptions.length === 0 ? (
-              <div className="ui-select-no-options">Nenhuma opção encontrada</div>
-            ) : (
-              filteredOptions.map((opt) => {
-                const isSelected = selectedValues.includes(opt.value);
-                return (
-                  <div
-                    key={opt.value}
-                    className={`ui-select-option ${isSelected ? "ui-option-selected" : ""} ${
-                      opt.disabled ? "ui-option-disabled" : ""
-                    }`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!opt.disabled) handleSelect(opt.value);
-                    }}
-                  >
-                    <div className="ui-option-label-wrapper">
-                      <span className="ui-option-text">{opt.label}</span>
-                      {opt.badge && <span className="ui-option-badge">{opt.badge}</span>}
-                    </div>
-                    {isSelected && <Check size={16} className="ui-option-check" />}
-                  </div>
-                );
-              })
+      {isOpen &&
+        dropdownPosition &&
+        typeof document !== "undefined" &&
+        ReactDOM.createPortal(
+          <div
+            ref={dropdownRef}
+            className={`ui-select-dropdown ui-select-portal animate-fade-in ${
+              dropdownPosition.placement === "top" ? "ui-select-dropdown-top" : ""
+            }`}
+            style={{
+              position: "fixed",
+              top: dropdownPosition.placement === "top" ? "auto" : `${dropdownPosition.top}px`,
+              bottom:
+                dropdownPosition.placement === "top"
+                  ? `${window.innerHeight - dropdownPosition.top}px`
+                  : "auto",
+              left: `${dropdownPosition.left}px`,
+              width: `${dropdownPosition.width}px`,
+              zIndex: 99999,
+            }}
+          >
+            {(searchable || options.length > 7) && (
+              <div className="ui-select-search-box" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="text"
+                  className="ui-select-search-input"
+                  placeholder="Buscar opções..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  autoFocus
+                />
+              </div>
             )}
-          </div>
-        </div>
-      )}
+
+            <div className="ui-select-options-list">
+              {filteredOptions.length === 0 ? (
+                <div className="ui-select-no-options">Nenhuma opção encontrada</div>
+              ) : (
+                filteredOptions.map((opt) => {
+                  const isSelected = selectedValues.includes(opt.value);
+                  return (
+                    <div
+                      key={opt.value}
+                      className={`ui-select-option ${isSelected ? "ui-option-selected" : ""} ${
+                        opt.disabled ? "ui-option-disabled" : ""
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!opt.disabled) handleSelect(opt.value);
+                      }}
+                    >
+                      <div className="ui-option-label-wrapper">
+                        <span className="ui-option-text">{opt.label}</span>
+                        {opt.badge && <span className="ui-option-badge">{opt.badge}</span>}
+                      </div>
+                      {isSelected && <Check size={16} className="ui-option-check" />}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
 
       {error && <span className="ui-field-error">{error}</span>}
       {!error && helperText && <span className="ui-field-helper">{helperText}</span>}

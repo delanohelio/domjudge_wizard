@@ -903,6 +903,7 @@ function serveIndexHtml(req, res) {
   fs.readFile(indexPath, "utf8", (err, html) => {
     if (err) return res.sendFile(indexPath);
     let output = html;
+    output = output.replace('src="/config.js"', `src="${BASE_PATH}/config.js"`);
     if (!output.includes("<base ")) {
       output = output.replace("<head>", `<head>\n    <base href="${BASE_PATH}/">`);
     }

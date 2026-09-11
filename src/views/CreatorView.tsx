@@ -302,24 +302,45 @@ export const CreatorView: React.FC = () => {
     }
   };
 
-  // Importar ZIP
+  // Importar ZIP completo (Enunciado + Casos de Teste + Metadados)
   const handleImportZip = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     try {
-      showToast("Importando e descompactando problema ZIP...", "info");
+      showToast("Importando e descompactando exercício do pacote ZIP...", "info");
       const parsed = await parseProblemZip(file);
-      if (parsed.title) setTitle(parsed.title);
+
+      if (parsed.markdownContent) {
+        setMarkdown(parsed.markdownContent);
+      }
+      if (parsed.title) {
+        setTitle(parsed.title);
+        if (!isEditMode) {
+          const generatedId = parsed.title
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "");
+          setProblemId(generatedId || "exercicio-importado");
+        }
+      }
       if (parsed.timeLimit) setTimeLimit(parsed.timeLimit);
       if (parsed.memoryLimit) setMemoryLimit(parsed.memoryLimit);
       if (parsed.testCases && parsed.testCases.length > 0) {
         setTestCases(parsed.testCases);
       }
-      showToast(`Problema importado com ${parsed.testCases.length} casos de teste!`, "success");
+
+      showToast(
+        `Exercício importado com sucesso (${parsed.testCases.length} casos de teste${
+          parsed.markdownContent ? " e enunciado completo" : ""
+        })!`,
+        "success"
+      );
     } catch (err: any) {
       console.error(err);
-      showToast("Falha ao importar o arquivo ZIP.", "error");
+      showToast("Falha ao importar o arquivo ZIP do exercício.", "error");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -538,7 +559,18 @@ export const CreatorView: React.FC = () => {
 
       {/* Markdown Studio */}
       <UiCard variant="default">
-        <UiCardHeader>
+        <UiCardHeader
+          action={
+            <UiButton
+              size="sm"
+              variant="dim"
+              onClick={() => fileInputRef.current?.click()}
+              icon={<FileUp size={14} />}
+            >
+              Importar Exercício
+            </UiButton>
+          }
+        >
           <UiCardTitle>Enunciado do Problema (Markdown Studio com KaTeX)</UiCardTitle>
         </UiCardHeader>
         <UiCardContent>
@@ -552,28 +584,7 @@ export const CreatorView: React.FC = () => {
 
       {/* Gerenciador de Casos de Teste */}
       <UiCard variant="default">
-        <UiCardHeader
-          action={
-            <UiFlex gap={8}>
-              <UiButton
-                size="sm"
-                variant="secondary"
-                onClick={() => handleAddTest("sample")}
-                icon={<Plus size={14} />}
-              >
-                + Exemplo Público (Sample)
-              </UiButton>
-              <UiButton
-                size="sm"
-                variant="dim"
-                onClick={() => handleAddTest("secret")}
-                icon={<Plus size={14} />}
-              >
-                + Caso Oculto de Avaliação (Secret)
-              </UiButton>
-            </UiFlex>
-          }
-        >
+        <UiCardHeader>
           <UiCardTitle>
             <UiFlex gap={8} align="center">
               <span>Casos de Teste Acadêmicos</span>
@@ -596,6 +607,26 @@ export const CreatorView: React.FC = () => {
                 onRemove={() => handleRemoveTest(index)}
               />
             ))}
+
+            {/* Ações para adicionar novos casos de teste SEMPRE abaixo do último caso adicionado */}
+            <UiFlex gap={10} justify="start" style={{ marginTop: 8 }}>
+              <UiButton
+                size="md"
+                variant="secondary"
+                onClick={() => handleAddTest("sample")}
+                icon={<Plus size={16} />}
+              >
+                + Exemplo Público (Sample)
+              </UiButton>
+              <UiButton
+                size="md"
+                variant="dim"
+                onClick={() => handleAddTest("secret")}
+                icon={<Plus size={16} />}
+              >
+                + Caso Oculto de Avaliação (Secret)
+              </UiButton>
+            </UiFlex>
           </UiStack>
         </UiCardContent>
       </UiCard>
