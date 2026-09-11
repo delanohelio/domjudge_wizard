@@ -7,6 +7,7 @@ import {
   UserAccount,
   ApiCredentials,
 } from "@/types/domjudge";
+import { apiPath } from "@/services/apiClient";
 
 export class DomjudgeApiService {
   private creds: ApiCredentials;
@@ -43,7 +44,7 @@ export class DomjudgeApiService {
     }
 
     const cleanPath = path.startsWith("/") ? path : `/${path}`;
-    const url = `${this.creds.apiBase}${cleanPath}`;
+    const url = apiPath(`/api/domjudge${cleanPath}`);
     const headers = {
       Accept: "application/json",
       ...this.getAuthHeaders(),
@@ -77,7 +78,7 @@ export class DomjudgeApiService {
       return { success: true, id: data.id };
     }
 
-    const url = `${this.creds.apiBase}/contests`;
+    const url = apiPath("/api/domjudge/contests");
     const fd = new FormData();
     const contestPayload: Record<string, any> = {
       id: data.id,
@@ -144,7 +145,7 @@ export class DomjudgeApiService {
     }
     formBody.append("force", data.force !== false ? "true" : "false");
 
-    const url = `${this.creds.apiBase}${cleanPath}`;
+    const url = apiPath(`/api/domjudge${cleanPath}`);
     const res = await fetch(url, {
       method: "PATCH",
       headers: {
@@ -182,7 +183,7 @@ export class DomjudgeApiService {
       return { success: true, contestId, problemId };
     }
     const cleanPath = `/contests/${encodeURIComponent(contestId)}/problems/${encodeURIComponent(problemId)}`;
-    const url = `${this.creds.apiBase}${cleanPath}`;
+    const url = apiPath(`/api/domjudge${cleanPath}`);
     const res = await fetch(url, {
       method: "DELETE",
       headers: {
@@ -300,7 +301,7 @@ export class DomjudgeApiService {
       return { success: true, count: accounts.length };
     }
 
-    const url = `${this.creds.apiBase}/users/accounts`;
+    const url = apiPath("/api/domjudge/users/accounts");
     const fd = new FormData();
     const jsonBlob = new Blob([JSON.stringify(accounts)], { type: "application/json" });
     fd.append("json", jsonBlob, "accounts.json");
@@ -327,9 +328,10 @@ export class DomjudgeApiService {
     }
 
     const cleanCid = (contestId || "").trim();
-    const url = cleanCid
-      ? `${this.creds.apiBase}/contests/${encodeURIComponent(cleanCid)}/problems`
-      : `${this.creds.apiBase}/problems`;
+    const cleanPath = cleanCid
+      ? `/contests/${encodeURIComponent(cleanCid)}/problems`
+      : `/problems`;
+    const url = apiPath(`/api/domjudge${cleanPath}`);
 
     const fd = new FormData();
     fd.append("zip", zipBlob, "problem.zip");

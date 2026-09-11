@@ -642,13 +642,106 @@ app.post("/api/register", async (req, res) => {
 });
 
 // ==============================================================================
-// PROXY TRANSPARENTE PARA A API DO DOMJUDGE (Elimina problemas de CORS)
+// ==============================================================================
+// PROXY SEGURO COM RBAC PARA A API DO DOMJUDGE
 // ==============================================================================
 
-app.all("/api/domjudge/*", requireAuth, async (req, res) => {
+function checkDomjudgeProxyPermission(req, res, next) {
+  const user = req.currentUser;
+  if (!user) {
+    return res.status(401).json({ success: false, error: "Sessão inválida ou expirada." });
+  }
+
+  // 1. Administradores possuem acesso irrestrito a todos os endpoints
+  const { adminLabel } = getAdminCredentials();
+  const isAdmin =
+    user.isAdmin === true ||
+    (Array.isArray(user.roles) && user.roles.includes("admin")) ||
+    (Array.isArray(user.labels) && user.labels.map((l) => String(l).toLowerCase()).includes(adminLabel));
+
+  if (isAdmin) {
+    return next();
+  }
+
+  const allowedPages = Array.isArray(user.allowedPages) ? user.allowedPages : [];
+  const method = req.method.toUpperCase();
+  const rawSubpath = (req.url.replace(/^\/api\/domjudge/, "") || "/").split("?")[0].toLowerCase();
+
+  // 2. Acompanhamento, Submissões, Julgamentos, Códigos-fonte e Times
+  if (
+    rawSubpath.includes("/submissions") ||
+    rawSubpath.includes("/judgements") ||
+    rawSubpath.includes("/teams") ||
+    rawSubpath.includes("/source-code")
+  ) {
+    if (allowedPages.includes("review")) return next();
+    return res.status(403).json({
+      success: false,
+      error: "Acesso negado: seu perfil não possui permissão para acessar submissões ou entregas ('review').",
+    });
+  }
+
+  // 3. Listas de Exercícios / Contests
+  if (rawSubpath.startsWith("/contests") || rawSubpath === "/contests") {
+    if (method === "GET") {
+      if (allowedPages.includes("review") || allowedPages.includes("contests") || allowedPages.includes("creator")) {
+        return next();
+      }
+    } else {
+      // POST, PATCH, PUT, DELETE em listas ou questões vinculadas
+      if (allowedPages.includes("contests")) {
+        return next();
+      }
+    }
+    return res.status(403).json({
+      success: false,
+      error: "Acesso negado: seu perfil não possui permissão para gerenciar listas de exercícios ('contests').",
+    });
+  }
+
+  // 4. Studio de Exercícios / Problems
+  if (rawSubpath.startsWith("/problems") || rawSubpath === "/problems") {
+    if (method === "GET") {
+      if (allowedPages.includes("creator") || allowedPages.includes("contests") || allowedPages.includes("review")) {
+        return next();
+      }
+    } else {
+      // POST, PUT, DELETE em problemas / upload de ZIP
+      if (allowedPages.includes("creator")) {
+        return next();
+      }
+    }
+    return res.status(403).json({
+      success: false,
+      error: "Acesso negado: seu perfil não possui permissão para criar ou modificar exercícios ('creator').",
+    });
+  }
+
+  // 5. Usuários, Categorias e Contas de Alunos
+  if (
+    rawSubpath.startsWith("/users") ||
+    rawSubpath.startsWith("/categories") ||
+    rawSubpath.startsWith("/teams/categories")
+  ) {
+    if (allowedPages.includes("users")) {
+      return next();
+    }
+    return res.status(403).json({
+      success: false,
+      error: "Acesso negado: seu perfil não possui permissão para gerenciar alunos ou contas ('users').",
+    });
+  }
+
+  return res.status(403).json({
+    success: false,
+    error: "Acesso negado: rota do DOMjudge não autorizada para o seu perfil.",
+  });
+}
+
+app.all("/api/domjudge/*", requireAuth, checkDomjudgeProxyPermission, async (req, res) => {
   try {
     const { apiBase, adminAuthHeader } = getAdminCredentials();
-    const subpath = req.originalUrl.replace(/^\/api\/domjudge/, "");
+    const subpath = req.url.replace(/^\/api\/domjudge/, "") || "/";
     const targetUrl = `${apiBase}${subpath}`;
 
     const headers = {
@@ -656,15 +749,28 @@ app.all("/api/domjudge/*", requireAuth, async (req, res) => {
       Accept: req.headers["accept"] || "application/json",
     };
 
+    const incomingContentType = req.headers["content-type"] || "";
+    if (incomingContentType) {
+      headers["Content-Type"] = incomingContentType;
+    }
+
     const fetchOptions = {
       method: req.method,
       headers,
     };
 
     if (["POST", "PUT", "PATCH"].includes(req.method.toUpperCase())) {
-      if (req.body && typeof req.body === "object") {
-        headers["Content-Type"] = "application/json";
-        fetchOptions.body = JSON.stringify(req.body);
+      if (req.body && typeof req.body === "object" && Object.keys(req.body).length > 0) {
+        if (incomingContentType.includes("application/x-www-form-urlencoded")) {
+          fetchOptions.body = new URLSearchParams(req.body).toString();
+        } else {
+          headers["Content-Type"] = "application/json";
+          fetchOptions.body = JSON.stringify(req.body);
+        }
+      } else {
+        // Multipart ou raw stream (ex: upload de zip de problema ou contest JSON)
+        fetchOptions.body = req;
+        fetchOptions.duplex = "half";
       }
     }
 
@@ -672,6 +778,11 @@ app.all("/api/domjudge/*", requireAuth, async (req, res) => {
     const contentType = domjudgeRes.headers.get("content-type") || "";
 
     res.status(domjudgeRes.status);
+
+    if (domjudgeRes.status === 204) {
+      return res.end();
+    }
+
     if (contentType.includes("application/json")) {
       const data = await domjudgeRes.json();
       return res.json(data);
