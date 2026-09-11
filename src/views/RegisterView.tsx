@@ -169,8 +169,9 @@ export const RegisterView: React.FC = () => {
     openAuthModal();
   };
 
-  const domjudgeUrl = window.__ENV__?.DOMJUDGE_API_BASE
-    ? window.__ENV__.DOMJUDGE_API_BASE.replace(/\/api\/v4\/?$/, "").replace(/\/api\/?$/, "")
+  const envApiUrl = window.__ENV__?.DOMJUDGE_API_URL || window.__ENV__?.DOMJUDGE_API_BASE;
+  const domjudgeUrl = envApiUrl
+    ? envApiUrl.replace(/\/api\/v4\/?$/, "").replace(/\/api\/?$/, "")
     : "https://coderunner.cin.ufpe.br";
 
   // TELA DE SUCESSO

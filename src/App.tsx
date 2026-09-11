@@ -279,13 +279,15 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {activeTab === "review" && canAccessPage("review") && <ReviewView />}
-          {activeTab === "creator" && canAccessPage("creator") && <CreatorView />}
-          {activeTab === "contests" && canAccessPage("contests") && <ContestManagerView />}
-          {activeTab === "users" && canAccessPage("users") && <UserManagerView />}
-          {activeTab === "codes" && canAccessPage("codes") && <AccessCodesView />}
-          {activeTab === "permissions" && canAccessPage("permissions") && <LabelPermissionsView />}
-          {activeTab === "trocar-senha" && canAccessPage("trocar-senha") && <ChangePasswordView />}
+          <div key={activeTab} className="edu-view-container view-enter">
+            {activeTab === "review" && canAccessPage("review") && <ReviewView />}
+            {activeTab === "creator" && canAccessPage("creator") && <CreatorView />}
+            {activeTab === "contests" && canAccessPage("contests") && <ContestManagerView />}
+            {activeTab === "users" && canAccessPage("users") && <UserManagerView />}
+            {activeTab === "codes" && canAccessPage("codes") && <AccessCodesView />}
+            {activeTab === "permissions" && canAccessPage("permissions") && <LabelPermissionsView />}
+            {activeTab === "trocar-senha" && canAccessPage("trocar-senha") && <ChangePasswordView />}
+          </div>
         </main>
       </div>
 

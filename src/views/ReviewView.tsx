@@ -333,6 +333,33 @@ export const ReviewView: React.FC = () => {
               </UiCardHeader>
 
               <UiCardContent>
+                <div style={{ marginBottom: 16 }}>
+                  <div
+                    style={{
+                      height: 5,
+                      width: "100%",
+                      background: "rgba(255, 255, 255, 0.06)",
+                      borderRadius: 9999,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${Math.min(100, Math.max(0, percentSolved))}%`,
+                        background:
+                          percentSolved > 60
+                            ? "var(--success)"
+                            : percentSolved > 30
+                            ? "var(--warning)"
+                            : "var(--brand)",
+                        borderRadius: 9999,
+                        transition: "width 0.6s var(--ease-out-expo)",
+                      }}
+                    />
+                  </div>
+                </div>
+
                 {subs.length === 0 ? (
                   <p className="text-sm text-muted" style={{ padding: "12px 0" }}>
                     Nenhum envio registrado para este exercício com os filtros selecionados.
@@ -444,6 +471,33 @@ export const ReviewView: React.FC = () => {
               </UiCardHeader>
 
               <UiCardContent>
+                <div style={{ marginBottom: 16 }}>
+                  <div
+                    style={{
+                      height: 5,
+                      width: "100%",
+                      background: "rgba(255, 255, 255, 0.06)",
+                      borderRadius: 9999,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${Math.min(100, Math.max(0, progressPercent))}%`,
+                        background:
+                          progressPercent === 100
+                            ? "var(--success)"
+                            : progressPercent > 0
+                            ? "var(--brand)"
+                            : "rgba(255, 255, 255, 0.1)",
+                        borderRadius: 9999,
+                        transition: "width 0.6s var(--ease-out-expo)",
+                      }}
+                    />
+                  </div>
+                </div>
+
                 {studentSubs.length === 0 ? (
                   <p className="text-sm text-muted">Este aluno ainda não enviou soluções para esta lista.</p>
                 ) : (
@@ -813,14 +867,16 @@ export const ReviewView: React.FC = () => {
             <UiSpinner size="lg" label="Carregando submissões e notas do juiz online..." />
           </UiFlex>
         </UiCard>
-      ) : viewMode === "student" ? (
-        renderStudentView()
-      ) : viewMode === "step" ? (
-        renderStepView()
-      ) : viewMode === "matrix" ? (
-        renderMatrixView()
       ) : (
-        renderQuestionView()
+        <div key={viewMode} className="edu-view-container view-enter">
+          {viewMode === "student"
+            ? renderStudentView()
+            : viewMode === "step"
+            ? renderStepView()
+            : viewMode === "matrix"
+            ? renderMatrixView()
+            : renderQuestionView()}
+        </div>
       )}
 
       {/* Modal de Inspeção Detalhada de Código */}

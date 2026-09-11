@@ -36,17 +36,19 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 declare global {
   interface Window {
     __ENV__?: {
+      DOMJUDGE_API_URL?: string;
       DOMJUDGE_API_BASE?: string;
       WIZARD_ADMIN_LABEL?: string;
+      SESSION_EXPIRATION_DAYS?: number;
       STORAGE_EXPIRATION_DAYS?: number;
     };
   }
 }
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const env = window.__ENV__ || {};
-  const defaultApiBase = env.DOMJUDGE_API_BASE || "https://coderunner.cin.ufpe.br/api/v4";
-  const expirationDays = Number(env.STORAGE_EXPIRATION_DAYS) || 7;
+  const env = (typeof window !== "undefined" && window.__ENV__) || {};
+  const defaultApiBase = env.DOMJUDGE_API_URL || env.DOMJUDGE_API_BASE || "https://coderunner.cin.ufpe.br/api/v4";
+  const expirationDays = Number(env.SESSION_EXPIRATION_DAYS) || Number(env.STORAGE_EXPIRATION_DAYS) || 7;
 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);

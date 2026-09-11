@@ -49,11 +49,11 @@ cp .env.example .env
 
 # 2. Configurar as variáveis no .env
 PORT=7070
-DOMJUDGE_API_BASE=https://coderunner.cin.ufpe.br/api/v4
+DOMJUDGE_API_URL=https://coderunner.cin.ufpe.br/api/v4
 DOMJUDGE_ADMIN_USER=admin
 DOMJUDGE_ADMIN_PASSWORD=sua_senha_admin
 WIZARD_ADMIN_LABEL=admin
-STORAGE_EXPIRATION_DAYS=7
+SESSION_EXPIRATION_DAYS=7
 
 # 3. Subir com Docker Compose
 docker compose up -d --build

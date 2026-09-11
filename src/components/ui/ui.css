@@ -13,10 +13,14 @@
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.18s ease-in-out;
+  transition: all var(--transition-fast);
   text-decoration: none;
   white-space: nowrap;
   user-select: none;
+}
+
+.ui-btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .ui-btn:disabled {
@@ -535,7 +539,7 @@
   padding: 20px;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .ui-card-elevated {
@@ -548,13 +552,20 @@
 }
 
 .ui-card-glow {
-  box-shadow: var(--shadow-glow);
-  border-color: rgba(99, 102, 241, 0.3);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.35);
+  transition: all var(--transition-fast);
+}
+
+.ui-card-glow:hover {
+  box-shadow: 0 0 28px rgba(99, 102, 241, 0.3);
+  border-color: rgba(99, 102, 241, 0.5);
 }
 
 .ui-card-interactive:hover {
-  border-color: var(--border-strong);
+  border-color: var(--border-hover);
   transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 .ui-card-header {
@@ -602,18 +613,20 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
+  animation: fadeIn 0.18s var(--ease-in-out-smooth);
 }
 
 .ui-modal-dialog {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-xl), 0 0 35px rgba(99, 102, 241, 0.15);
   width: 100%;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  animation: modalPop 0.24s var(--ease-spring-snappy) forwards;
 }
 
 .ui-modal-sm { max-width: 420px; }
@@ -700,18 +713,23 @@
   font-weight: 600;
   color: var(--ink-secondary);
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: all var(--transition-fast);
   user-select: none;
 }
 
 .ui-tab-btn:hover:not(:disabled) {
   color: var(--ink);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.ui-tab-btn:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .ui-tabs-pill .ui-tab-active {
   background: var(--brand);
   color: #ffffff;
-  box-shadow: 0 2px 8px var(--brand-glow);
+  box-shadow: 0 2px 10px var(--brand-glow);
 }
 
 .ui-tabs-line {
@@ -943,12 +961,13 @@
   padding: 18px 20px;
   position: relative;
   overflow: hidden;
-  transition: all 0.2s ease;
+  transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .ui-metric-card:hover {
-  border-color: var(--border-strong);
-  transform: translateY(-2px);
+  border-color: var(--border-hover);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md), 0 0 20px rgba(99, 102, 241, 0.12);
 }
 
 .ui-metric-header {

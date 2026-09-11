@@ -20,7 +20,7 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Gerenciador de Sessões ativas em memória com TTL
 const activeSessions = new Map(); // token -> { user, createdAt, expiresAt }
-const SESSION_TTL_MS = (Number(process.env.STORAGE_EXPIRATION_DAYS) || 7) * 24 * 60 * 60 * 1000;
+const SESSION_TTL_MS = (Number(process.env.SESSION_EXPIRATION_DAYS) || Number(process.env.STORAGE_EXPIRATION_DAYS) || 7) * 24 * 60 * 60 * 1000;
 
 function createSession(user) {
   const token = crypto.randomUUID();
@@ -78,9 +78,9 @@ function requireAdmin(req, res, next) {
 
 // Configurações e credenciais administrativas do DOMjudge
 function getAdminCredentials() {
-  const adminUser = process.env.DOMJUDGE_ADMIN_USER || process.env.DOMJUDGE_API_USER || "";
-  const adminPassword = process.env.DOMJUDGE_ADMIN_PASSWORD || process.env.DOMJUDGE_API_PASSWORD || "";
-  const apiBase = (process.env.DOMJUDGE_API_BASE || "https://coderunner.cin.ufpe.br/api/v4").replace(/\/+$/, "");
+  const adminUser = process.env.DOMJUDGE_ADMIN_USER || "";
+  const adminPassword = process.env.DOMJUDGE_ADMIN_PASSWORD || "";
+  const apiBase = (process.env.DOMJUDGE_API_URL || process.env.DOMJUDGE_API_BASE || "https://coderunner.cin.ufpe.br/api/v4").replace(/\/+$/, "");
   const adminLabel = (process.env.WIZARD_ADMIN_LABEL || "admin").trim().toLowerCase();
   const adminAuthHeader = `Basic ${Buffer.from(`${adminUser}:${adminPassword}`).toString("base64")}`;
   return { adminUser, adminPassword, apiBase, adminLabel, adminAuthHeader };
@@ -205,10 +205,12 @@ process.on("SIGTERM", async () => {
 // Endpoint dinâmico de configuração com variáveis de ambiente públicas
 app.get("/config.js", (req, res) => {
   res.setHeader("Content-Type", "application/javascript");
+  const apiBase = process.env.DOMJUDGE_API_URL || process.env.DOMJUDGE_API_BASE || "https://coderunner.cin.ufpe.br/api/v4";
   const config = {
-    DOMJUDGE_API_BASE: process.env.DOMJUDGE_API_BASE || "https://coderunner.cin.ufpe.br/api/v4",
+    DOMJUDGE_API_URL: apiBase,
+    DOMJUDGE_API_BASE: apiBase,
     WIZARD_ADMIN_LABEL: process.env.WIZARD_ADMIN_LABEL || "admin",
-    STORAGE_EXPIRATION_DAYS: Number(process.env.STORAGE_EXPIRATION_DAYS) || 7,
+    SESSION_EXPIRATION_DAYS: Number(process.env.SESSION_EXPIRATION_DAYS) || Number(process.env.STORAGE_EXPIRATION_DAYS) || 7,
   };
   res.send(`window.__ENV__ = ${JSON.stringify(config, null, 2)};\n`);
 });

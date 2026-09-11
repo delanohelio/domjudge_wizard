@@ -11,13 +11,11 @@ services:
       - "${PORT:-7070}:7070"
     environment:
       - PORT=7070
-      - DOMJUDGE_API_BASE=${DOMJUDGE_API_BASE:-https://coderunner.cin.ufpe.br/api/v4}
-      - DOMJUDGE_API_USER=${DOMJUDGE_API_USER:-}
-      - DOMJUDGE_API_PASSWORD=${DOMJUDGE_API_PASSWORD:-}
-      - DOMJUDGE_ADMIN_USER=${DOMJUDGE_ADMIN_USER:-}
+      - DOMJUDGE_API_URL=${DOMJUDGE_API_URL:-https://coderunner.cin.ufpe.br/api/v4}
+      - DOMJUDGE_ADMIN_USER=${DOMJUDGE_ADMIN_USER:-admin}
       - DOMJUDGE_ADMIN_PASSWORD=${DOMJUDGE_ADMIN_PASSWORD:-}
       - WIZARD_ADMIN_LABEL=${WIZARD_ADMIN_LABEL:-admin}
-      - STORAGE_EXPIRATION_DAYS=${STORAGE_EXPIRATION_DAYS:-7}
+      - SESSION_EXPIRATION_DAYS=${SESSION_EXPIRATION_DAYS:-7}
     volumes:
       - ./data:/app/data
     env_file:

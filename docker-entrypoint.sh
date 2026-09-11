@@ -4,10 +4,10 @@ set -e
 # Gerar config.js dinamicamente com base nas variáveis de ambiente passadas ao container
 cat <<EOF > /usr/share/nginx/html/config.js
 window.__ENV__ = {
-  DOMJUDGE_API_BASE: "${DOMJUDGE_API_BASE:-https://coderunner.cin.ufpe.br/api/v4}",
-  DOMJUDGE_API_USER: "${DOMJUDGE_API_USER:-}",
-  DOMJUDGE_API_PASSWORD: "${DOMJUDGE_API_PASSWORD:-}",
-  STORAGE_EXPIRATION_DAYS: ${STORAGE_EXPIRATION_DAYS:-7}
+  DOMJUDGE_API_URL: "${DOMJUDGE_API_URL:-${DOMJUDGE_API_BASE:-https://coderunner.cin.ufpe.br/api/v4}}",
+  DOMJUDGE_API_BASE: "${DOMJUDGE_API_URL:-${DOMJUDGE_API_BASE:-https://coderunner.cin.ufpe.br/api/v4}}",
+  WIZARD_ADMIN_LABEL: "${WIZARD_ADMIN_LABEL:-admin}",
+  SESSION_EXPIRATION_DAYS: ${SESSION_EXPIRATION_DAYS:-7}
 };
 EOF
 

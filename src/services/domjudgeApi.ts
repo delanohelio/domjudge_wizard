@@ -63,21 +63,187 @@ export class DomjudgeApiService {
     return this.request<Contest[]>("/contests");
   }
 
-  async patchContest(contestId: string, data: { start_time?: string | null; end_time?: string | null; enabled?: boolean }): Promise<any> {
+  async createContest(data: {
+    id: string;
+    name: string;
+    formal_name?: string;
+    shortname?: string;
+    start_time: string;
+    duration?: string;
+    end_time?: string;
+    enabled?: boolean;
+  }): Promise<any> {
+    if (this.creds.isDemo) {
+      return { success: true, id: data.id };
+    }
+
+    const url = `${this.creds.apiBase}/contests`;
+    const fd = new FormData();
+    const contestPayload: Record<string, any> = {
+      id: data.id,
+      name: data.name,
+      formal_name: data.formal_name || data.name,
+      shortname: data.shortname || data.id,
+      start_time: data.start_time,
+    };
+
+    if (data.duration) {
+      contestPayload.duration = data.duration;
+    } else if (data.end_time) {
+      const diffMs = Math.max(0, new Date(data.end_time).getTime() - new Date(data.start_time).getTime());
+      const totalSecs = Math.floor(diffMs / 1000);
+      const hours = Math.floor(totalSecs / 3600);
+      const mins = Math.floor((totalSecs % 3600) / 60);
+      const secs = totalSecs % 60;
+      contestPayload.duration = `${hours}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}.000`;
+    } else {
+      contestPayload.duration = "168:00:00.000"; // 7 dias padrão
+    }
+
+    const jsonBlob = new Blob([JSON.stringify(contestPayload)], { type: "application/json" });
+    fd.append("json", jsonBlob, "contest.json");
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        ...this.getAuthHeaders(),
+      },
+      body: fd,
+    });
+
+    if (!res.ok) {
+      const errTxt = await res.text().catch(() => "");
+      throw new Error(`Falha ao criar lista (${res.status}): ${errTxt}`);
+    }
+    return res.json().catch(() => ({ success: true, id: data.id }));
+  }
+
+  async patchContest(
+    contestId: string,
+    data: {
+      start_time?: string | null;
+      end_time?: string | null;
+      enabled?: boolean;
+      scoreboard_thaw_time?: string | null;
+      force?: boolean;
+    }
+  ): Promise<any> {
     if (this.creds.isDemo) {
       return { success: true, contestId, ...data };
     }
+
     const cleanPath = `/contests/${encodeURIComponent(contestId)}`;
-    return this.request(cleanPath, {
+    const formBody = new URLSearchParams();
+    formBody.append("id", contestId);
+
+    if (data.start_time) {
+      formBody.append("start_time", data.start_time);
+    }
+    if (data.scoreboard_thaw_time) {
+      formBody.append("scoreboard_thaw_time", data.scoreboard_thaw_time);
+    }
+    formBody.append("force", data.force !== false ? "true" : "false");
+
+    const url = `${this.creds.apiBase}${cleanPath}`;
+    const res = await fetch(url, {
       method: "PATCH",
+      headers: {
+        ...this.getAuthHeaders(),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: formBody.toString(),
+    });
+
+    if (!res.ok) {
+      const errTxt = await res.text().catch(() => "");
+      throw new Error(`Falha ao atualizar lista (${res.status}): ${errTxt}`);
+    }
+
+    if (res.status === 204) {
+      return { success: true, contestId };
+    }
+    return res.json().catch(() => ({ success: true, contestId }));
+  }
+
+  async linkProblemToContest(contestId: string, problemId: string, label: string): Promise<any> {
+    if (this.creds.isDemo) {
+      return { success: true, contestId, problemId, label };
+    }
+    const cleanPath = `/contests/${encodeURIComponent(contestId)}/problems/${encodeURIComponent(problemId)}`;
+    return this.request(cleanPath, {
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
+      body: JSON.stringify({ label }),
     });
   }
 
+  async unlinkProblemFromContest(contestId: string, problemId: string): Promise<any> {
+    if (this.creds.isDemo) {
+      return { success: true, contestId, problemId };
+    }
+    const cleanPath = `/contests/${encodeURIComponent(contestId)}/problems/${encodeURIComponent(problemId)}`;
+    const url = `${this.creds.apiBase}${cleanPath}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: {
+        ...this.getAuthHeaders(),
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok && res.status !== 204) {
+      const errTxt = await res.text().catch(() => "");
+      throw new Error(`Falha ao desvincular questão (${res.status}): ${errTxt}`);
+    }
+    return { success: true };
+  }
+
+  async duplicateContest(
+    sourceContestId: string,
+    newContestData: {
+      id: string;
+      name: string;
+      formal_name?: string;
+      shortname?: string;
+      start_time: string;
+      duration?: string;
+      end_time?: string;
+    },
+    copyProblems: boolean = true
+  ): Promise<any> {
+    // 1. Obter questões da lista original
+    let existingProblems: Problem[] = [];
+    if (copyProblems) {
+      try {
+        existingProblems = await this.getProblems(sourceContestId);
+      } catch (err) {
+        console.warn("Aviso ao buscar questões para duplicar:", err);
+      }
+    }
+
+    // 2. Criar a nova lista de exercícios
+    const created = await this.createContest(newContestData);
+
+    // 3. Vincular as questões na nova lista
+    if (copyProblems && existingProblems.length > 0) {
+      for (const p of existingProblems) {
+        try {
+          const label = p.label || p.short_name || p.id;
+          await this.linkProblemToContest(newContestData.id, p.id, label);
+        } catch (linkErr) {
+          console.warn(`Aviso ao vincular questão ${p.id} na nova lista:`, linkErr);
+        }
+      }
+    }
+
+    return created;
+  }
+
   // 2. Problems
-  async getProblems(contestId: string): Promise<Problem[]> {
-    return this.request<Problem[]>(`/contests/${encodeURIComponent(contestId)}/problems`);
+  async getProblems(contestId?: string): Promise<Problem[]> {
+    if (contestId) {
+      return this.request<Problem[]>(`/contests/${encodeURIComponent(contestId)}/problems`);
+    }
+    return this.request<Problem[]>("/problems");
   }
 
   // 3. Submissions
@@ -154,13 +320,17 @@ export class DomjudgeApiService {
     return res.json().catch(() => ({ success: true }));
   }
 
-  // 10. Upload Problem Zip
-  async uploadProblemZip(contestId: string, zipBlob: Blob): Promise<any> {
+  // 10. Upload Problem Zip (Suporta envio para Lista ou Banco Geral Avulso)
+  async uploadProblemZip(contestId: string | null | undefined, zipBlob: Blob): Promise<any> {
     if (this.creds.isDemo) {
       return { success: true, problem_id: "demo-prob-1" };
     }
 
-    const url = `${this.creds.apiBase}/contests/${encodeURIComponent(contestId)}/problems`;
+    const cleanCid = (contestId || "").trim();
+    const url = cleanCid
+      ? `${this.creds.apiBase}/contests/${encodeURIComponent(cleanCid)}/problems`
+      : `${this.creds.apiBase}/problems`;
+
     const fd = new FormData();
     fd.append("zip", zipBlob, "problem.zip");
 

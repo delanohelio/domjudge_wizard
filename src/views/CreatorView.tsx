@@ -325,17 +325,17 @@ export const CreatorView: React.FC = () => {
     }
   };
 
-  // Enviar direto para a lista no DOMjudge
+  // Enviar direto para o DOMjudge (Lista ou Banco Geral Avulso)
   const handleSendToDomjudge = async () => {
-    const activeContest = targetContestId || selectedContestId;
-    if (!activeContest) {
-      showToast("Selecione uma lista de exercícios para vincular este problema.", "warning");
-      return;
-    }
-
     setIsUploading(true);
     try {
-      showToast("Gerando pacote e enviando para a lista de exercícios no DOMjudge...", "info");
+      const isUnlinked = !targetContestId;
+      showToast(
+        isUnlinked
+          ? "Gerando pacote e cadastrando exercício no Banco Geral do DOMjudge..."
+          : `Gerando pacote e vinculando à lista '${targetContestId}'...`,
+        "info"
+      );
       const api = new DomjudgeApiService(credentials);
       const zipBlob = await createProblemZip({
         title,
@@ -346,8 +346,13 @@ export const CreatorView: React.FC = () => {
         testCases,
       });
 
-      await api.uploadProblemZip(activeContest, zipBlob);
-      showToast(`Exercício enviado com sucesso para a lista '${activeContest}'!`, "success");
+      await api.uploadProblemZip(targetContestId || null, zipBlob);
+      showToast(
+        isUnlinked
+          ? `Exercício '${title}' cadastrado com sucesso no Banco Geral do DOMjudge!`
+          : `Exercício cadastrado e vinculado com sucesso à lista '${targetContestId}'!`,
+        "success"
+      );
     } catch (err: any) {
       console.error(err);
       showToast(err.message || "Erro no upload do problema.", "error");
@@ -362,12 +367,21 @@ export const CreatorView: React.FC = () => {
       <UiCard variant="glow">
         <UiFlex justify="between" align="center" wrap gap={16}>
           <UiStack gap={4}>
-            <UiFlex gap={8} align="center">
+            <UiFlex gap={8} align="center" wrap>
               <BookOpen className="text-brand" size={24} />
               <h2 className="text-xl font-bold">Studio de Exercícios Práticos</h2>
+              {targetContestId ? (
+                <UiBadge variant="brand" size="sm" dot>
+                  Vinculando à Lista: {contests.find((c) => c.id === targetContestId)?.name || targetContestId}
+                </UiBadge>
+              ) : (
+                <UiBadge variant="neutral" size="sm">
+                  Exercício Avulso (Banco Geral)
+                </UiBadge>
+              )}
             </UiFlex>
             <p className="text-muted text-sm">
-              Elabore questões com equações KaTeX, configure casos de teste e exporte diretamente para o DOMjudge ou PDF.
+              Elabore questões didáticas com KaTeX, configure casos de teste e exporte para PDF, arquivo ZIP ou salve no DOMjudge com ou sem lista vinculada.
             </p>
           </UiStack>
 
@@ -406,12 +420,12 @@ export const CreatorView: React.FC = () => {
             </UiButton>
 
             <UiButton
-              variant="primary"
+              variant={targetContestId ? "primary" : "secondary"}
               onClick={handleSendToDomjudge}
               loading={isUploading}
-              icon={<UploadCloud size={16} />}
+              icon={targetContestId ? <UploadCloud size={16} /> : <HardDrive size={16} />}
             >
-              Publicar na Lista
+              {targetContestId ? "Publicar na Lista" : "Salvar no Banco Geral"}
             </UiButton>
           </UiFlex>
         </UiFlex>
@@ -489,16 +503,21 @@ export const CreatorView: React.FC = () => {
             />
 
             <UiSelect
-              label="Vincular à Lista de Exercícios"
+              label="Vincular à Lista de Exercícios (Opcional)"
               options={[
-                { value: "", label: "Nenhuma lista selecionada" },
+                { value: "", label: "Nenhuma lista (Criar questão avulsa no Banco Geral)" },
                 ...contests.map((c) => ({
                   value: c.id,
                   label: `${c.name} (${c.id})`,
                 })),
               ]}
-              value={targetContestId || selectedContestId || ""}
+              value={targetContestId}
               onChange={(val) => setTargetContestId(val as string)}
+              helperText={
+                !targetContestId
+                  ? "A questão será salva no banco geral e poderá ser vinculada a qualquer lista posteriormente."
+                  : "A questão será vinculada automaticamente a esta lista."
+              }
             />
           </UiGrid>
 
