@@ -681,9 +681,13 @@ app.get("/api/admin/users", requireAuth, requireUsersPermission, async (req, res
         enabled: u.enabled !== false,
         roles: u.roles || ["team"],
         team_id: u.team_id || null,
+        group_ids: team?.group_ids || [],
+        category: (team && Array.isArray(team.group_ids) && team.group_ids.length > 0) ? team.group_ids.join(", ") : null,
         roleLabel,
         turmaLabels,
+        turmasLabels: turmaLabels,
         allLabels: filteredLabels,
+        labels: filteredLabels,
       };
     });
 
@@ -707,27 +711,80 @@ app.patch("/api/admin/users/:username", requireAuth, requireUsersPermission, asy
     const turmasInput = turmasLabels || turmaLabels || [];
     const cleanTurmas = Array.isArray(turmasInput) ? turmasInput.map((t) => String(t).trim()).filter(Boolean) : [];
 
-    // 1. Atualizar ou Criar Time com as novas labels
+    // 1. Obter usuário e time atual para preservar categoria (group_ids), afiliação e outros metadados do DOMjudge
+    let existingTeam = null;
+    let existingUser = null;
+    try {
+      const [resUser, resTeam] = await Promise.all([
+        fetch(`${apiBase}/users/${encodeURIComponent(cleanUsername)}`, {
+          headers: { Authorization: adminAuthHeader, Accept: "application/json" },
+        }).catch(() => null),
+        fetch(`${apiBase}/teams/${encodeURIComponent(cleanUsername)}`, {
+          headers: { Authorization: adminAuthHeader, Accept: "application/json" },
+        }).catch(() => null),
+      ]);
+
+      if (resUser && resUser.ok) {
+        existingUser = await resUser.json();
+      }
+      if (resTeam && resTeam.ok) {
+        existingTeam = await resTeam.json();
+      }
+
+      const targetTeamId = existingTeam?.id || existingUser?.team_id || cleanUsername;
+      if (!existingTeam || !existingTeam.group_ids) {
+        const resTeams = await fetch(`${apiBase}/teams`, {
+          headers: { Authorization: adminAuthHeader, Accept: "application/json" },
+        });
+        if (resTeams.ok) {
+          const allTeams = await resTeams.json();
+          const found = allTeams.find(
+            (t) => String(t.id).toLowerCase() === String(targetTeamId).toLowerCase() ||
+                   String(t.id).toLowerCase() === cleanUsername.toLowerCase() ||
+                   (t.teamid && String(t.teamid) === String(targetTeamId))
+          );
+          if (found) existingTeam = found;
+        }
+      }
+    } catch (teamFetchErr) {
+      console.warn("Aviso ao buscar time existente para preservar categoria:", teamFetchErr.message);
+    }
+
+    // 2. Atualizar ou Criar Time preservando categoria (group_ids) e aplicando as novas labels
     const combinedLabels = [cleanUsername, cleanRole, ...cleanTurmas].filter(Boolean);
     const labelStr = Array.from(new Set(combinedLabels)).join(", ");
 
-    const teamPayload = [
-      {
-        id: cleanUsername,
-        name: name || cleanUsername,
-        label: labelStr,
-      },
-    ];
+    const targetTeamId = existingTeam?.id || existingUser?.team_id || cleanUsername;
+    const teamObj = {
+      id: targetTeamId,
+      name: name || existingTeam?.name || existingUser?.name || cleanUsername,
+      label: labelStr,
+    };
+
+    if (existingTeam) {
+      if (Array.isArray(existingTeam.group_ids) && existingTeam.group_ids.length > 0) {
+        teamObj.group_ids = existingTeam.group_ids;
+      }
+      if (existingTeam.organization_id) {
+        teamObj.organization_id = existingTeam.organization_id;
+      }
+      if (existingTeam.affiliation) {
+        teamObj.affiliation = existingTeam.affiliation;
+      }
+      if (typeof existingTeam.hidden === "boolean") {
+        teamObj.hidden = existingTeam.hidden;
+      }
+    }
 
     const fdTeams = new FormData();
-    fdTeams.append("json", new Blob([JSON.stringify(teamPayload)], { type: "application/json" }), "teams.json");
+    fdTeams.append("json", new Blob([JSON.stringify([teamObj])], { type: "application/json" }), "teams.json");
     await fetch(`${apiBase}/users/teams`, {
       method: "POST",
       headers: { Authorization: adminAuthHeader },
       body: fdTeams,
     });
 
-    // 2. Determinar roles e tipo do DOMjudge
+    // 3. Determinar roles e tipo do DOMjudge
     let roles = ["team"];
     if (cleanRole === "admin") roles = ["admin", "jury", "team"];
     else if (cleanRole === "professor" || cleanRole === "monitor") roles = ["jury", "team"];
@@ -737,11 +794,11 @@ app.patch("/api/admin/users/:username", requireAuth, requireUsersPermission, asy
     const accountPayload = {
       type: "team",
       username: cleanUsername,
-      name: name || cleanUsername,
-      email: email || null,
-      team_id: cleanUsername,
+      name: name || existingUser?.name || existingTeam?.name || cleanUsername,
+      email: email !== undefined ? (email || null) : (existingUser?.email || null),
+      team_id: targetTeamId,
       roles,
-      enabled: enabled !== false,
+      enabled: typeof enabled === "boolean" ? enabled : (existingUser?.enabled !== false),
     };
     if (password && String(password).trim().length >= 6) {
       accountPayload.password = String(password).trim();
@@ -906,11 +963,26 @@ app.post("/api/admin/users/batch", requireAuth, requireUsersPermission, async (r
       }
 
       if (teamModified) {
-        teamsToUpdate.push({
+        const teamObj = {
           id: u,
           name: existingTeam ? existingTeam.name : u,
           label: currentLabels.join(", "),
-        });
+        };
+        if (existingTeam) {
+          if (Array.isArray(existingTeam.group_ids) && existingTeam.group_ids.length > 0) {
+            teamObj.group_ids = existingTeam.group_ids;
+          }
+          if (existingTeam.organization_id) {
+            teamObj.organization_id = existingTeam.organization_id;
+          }
+          if (existingTeam.affiliation) {
+            teamObj.affiliation = existingTeam.affiliation;
+          }
+          if (typeof existingTeam.hidden === "boolean") {
+            teamObj.hidden = existingTeam.hidden;
+          }
+        }
+        teamsToUpdate.push(teamObj);
       }
     }
 
