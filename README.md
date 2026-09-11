@@ -54,14 +54,16 @@ DOMJUDGE_ADMIN_USER=admin
 DOMJUDGE_ADMIN_PASSWORD=sua_senha_admin
 WIZARD_ADMIN_LABEL=admin
 SESSION_EXPIRATION_DAYS=7
+ENABLE_DEMO_MODE=true
+BASE_PATH=            # Ex: /wizard se estiver sob proxy reverso em subrota
 
 # 3. Subir com Docker Compose
 docker compose up -d --build
 ```
 
-Acesse a plataforma em: `http://localhost:7070`
-- Rota de auto-cadastro: `http://localhost:7070/cadastro`
-- Rota de troca de senha: `http://localhost:7070/trocar-senha`
+Acesse a plataforma em: `http://localhost:7070` (ou `http://localhost:7070/wizard` se `BASE_PATH=/wizard`)
+- Rota de auto-cadastro: `http://localhost:7070/cadastro` (ou `/wizard/cadastro`)
+- Rota de troca de senha: `http://localhost:7070/trocar-senha` (ou `/wizard/trocar-senha`)
 
 ---
 

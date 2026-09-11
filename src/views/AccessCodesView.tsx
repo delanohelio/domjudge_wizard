@@ -34,6 +34,7 @@ import {
   updateAccessCode,
   deleteAccessCode,
 } from "@/services/adminService";
+import { getBasePath } from "@/services/apiClient";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 
@@ -275,7 +276,8 @@ export const AccessCodesView: React.FC = () => {
 
   const copyRegistrationLink = (codeStr: string, id: string) => {
     const host = window.location.origin;
-    const link = `${host}/cadastro?codigo=${encodeURIComponent(codeStr)}`;
+    const base = getBasePath();
+    const link = `${host}${base}/cadastro?codigo=${encodeURIComponent(codeStr)}`;
     navigator.clipboard.writeText(link);
     setCopiedId(id);
     showToast("Link direto de cadastro copiado para a área de transferência!", "success");

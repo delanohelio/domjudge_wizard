@@ -14,7 +14,27 @@ storage.initStorage();
 const app = express();
 const PORT = process.env.PORT || 7070;
 
+// Configuração de subrota (ex: BASE_PATH=/wizard)
+const rawBasePath = (process.env.BASE_PATH || "").trim();
+const BASE_PATH = rawBasePath ? ("/" + rawBasePath.replace(/^\/+|\/+$/g, "")) : "";
+
 app.use(cors());
+
+// Se o sistema estiver operando sob uma subrota, reescrever req.url para compatibilidade total
+if (BASE_PATH) {
+  app.use((req, res, next) => {
+    if (req.url === BASE_PATH) {
+      req.url = "/";
+      return next();
+    }
+    if (req.url.startsWith(BASE_PATH + "/")) {
+      req.url = req.url.slice(BASE_PATH.length) || "/";
+      return next();
+    }
+    next();
+  });
+}
+
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
@@ -206,11 +226,14 @@ process.on("SIGTERM", async () => {
 app.get("/config.js", (req, res) => {
   res.setHeader("Content-Type", "application/javascript");
   const apiBase = process.env.DOMJUDGE_API_URL || process.env.DOMJUDGE_API_BASE || "https://coderunner.cin.ufpe.br/api/v4";
+  const isDemoEnabled = String(process.env.ENABLE_DEMO_MODE ?? "true").toLowerCase() !== "false" && String(process.env.ENABLE_DEMO_MODE ?? "true") !== "0";
   const config = {
     DOMJUDGE_API_URL: apiBase,
     DOMJUDGE_API_BASE: apiBase,
     WIZARD_ADMIN_LABEL: process.env.WIZARD_ADMIN_LABEL || "admin",
     SESSION_EXPIRATION_DAYS: Number(process.env.SESSION_EXPIRATION_DAYS) || Number(process.env.STORAGE_EXPIRATION_DAYS) || 7,
+    ENABLE_DEMO_MODE: isDemoEnabled,
+    BASE_PATH: BASE_PATH,
   };
   res.send(`window.__ENV__ = ${JSON.stringify(config, null, 2)};\n`);
 });
@@ -863,31 +886,45 @@ app.post("/api/change-password", async (req, res) => {
 });
 
 // ==============================================================================
-// ROTAS AMIGÁVEIS STANDALONE (SPA)
+// ROTAS AMIGÁVEIS STANDALONE (SPA) & ARQUIVOS ESTÁTICOS
 // ==============================================================================
 
-app.get(["/trocar-senha", "/change-password", "/cadastro", "/register", "/criar-conta"], (req, res) => {
-  const distPath = path.join(__dirname, "dist");
-  if (fs.existsSync(distPath)) {
-    res.sendFile(path.join(distPath, "index.html"));
-  } else {
-    res.sendFile(path.join(__dirname, "index.html"));
+const distPath = path.join(__dirname, "dist");
+
+function serveIndexHtml(req, res) {
+  const targetDir = fs.existsSync(distPath) ? distPath : __dirname;
+  const indexPath = path.join(targetDir, "index.html");
+  if (!fs.existsSync(indexPath)) {
+    return res.status(404).send("index.html não encontrado");
   }
+  if (!BASE_PATH) {
+    return res.sendFile(indexPath);
+  }
+  fs.readFile(indexPath, "utf8", (err, html) => {
+    if (err) return res.sendFile(indexPath);
+    let output = html;
+    if (!output.includes("<base ")) {
+      output = output.replace("<head>", `<head>\n    <base href="${BASE_PATH}/">`);
+    }
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(output);
+  });
+}
+
+app.get(["/trocar-senha", "/change-password", "/cadastro", "/register", "/criar-conta"], (req, res) => {
+  serveIndexHtml(req, res);
 });
 
 // Servir arquivos estáticos (priorizar dist se compilado)
-const distPath = path.join(__dirname, "dist");
 if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
-  app.get("*", (req, res) => {
-    res.sendFile(path.join(distPath, "index.html"));
-  });
+  app.use(express.static(distPath, { index: false }));
 } else {
-  app.use(express.static(__dirname));
-  app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "index.html"));
-  });
+  app.use(express.static(__dirname, { index: false }));
 }
+
+app.get("*", (req, res) => {
+  serveIndexHtml(req, res);
+});
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor DOMjudge Wizard 2.0 rodando na porta ${PORT} (http://localhost:${PORT})`);

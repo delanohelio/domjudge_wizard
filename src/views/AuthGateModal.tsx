@@ -15,7 +15,15 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
 
 export const AuthGateModal: React.FC = () => {
-  const { isAuthModalOpen, closeAuthModal, login, enableDemoMode, user, isAuthenticated } = useAuth();
+  const {
+    isAuthModalOpen,
+    closeAuthModal,
+    login,
+    enableDemoMode,
+    user,
+    isAuthenticated,
+    isDemoAllowed,
+  } = useAuth();
   const { showToast } = useToast();
 
   const [username, setUsername] = useState(user?.username || "");
@@ -140,14 +148,16 @@ export const AuthGateModal: React.FC = () => {
               Entrar no Wizard
             </UiButton>
 
-            <UiButton
-              type="button"
-              variant="dim"
-              onClick={handleDemo}
-              title="Acessar com perfil simulado de testes"
-            >
-              Modo Demo
-            </UiButton>
+            {isDemoAllowed && (
+              <UiButton
+                type="button"
+                variant="dim"
+                onClick={handleDemo}
+                title="Acessar com perfil simulado de testes"
+              >
+                Modo Demo
+              </UiButton>
+            )}
           </UiFlex>
 
           {/* Links para auto-serviço (Cadastro e Troca de Senha) */}

@@ -25,6 +25,7 @@ import { AccessCodesView } from "@/views/AccessCodesView";
 import { LabelPermissionsView } from "@/views/LabelPermissionsView";
 import { RegisterView } from "@/views/RegisterView";
 import { AuthGateModal } from "@/views/AuthGateModal";
+import { getBasePath } from "@/services/apiClient";
 import "@/components/layout/layout.css";
 import "./App.css";
 
@@ -39,9 +40,9 @@ export const App: React.FC = () => {
     const hash = window.location.hash.toLowerCase();
 
     if (
-      path === "/cadastro" ||
-      path === "/register" ||
-      path === "/criar-conta" ||
+      path.endsWith("/cadastro") ||
+      path.endsWith("/register") ||
+      path.endsWith("/criar-conta") ||
       hash === "#cadastro" ||
       hash === "#register"
     ) {
@@ -49,14 +50,29 @@ export const App: React.FC = () => {
     }
 
     if (
-      path === "/trocar-senha" ||
-      path === "/change-password" ||
+      path.endsWith("/trocar-senha") ||
+      path.endsWith("/change-password") ||
       ((hash === "#trocar-senha" || hash === "#change-password") && !isAuthenticated)
     ) {
       return "password";
     }
 
     return null;
+  };
+
+  const navigateToApp = (openLogin = false) => {
+    const base = getBasePath();
+    if (typeof window !== "undefined") {
+      if (window.history && window.history.pushState) {
+        window.history.pushState({}, "", (base || "") + "/#review");
+      } else {
+        window.location.hash = "#review";
+      }
+    }
+    setStandaloneType(null);
+    if (openLogin) {
+      openAuthModal();
+    }
   };
 
   const [standaloneType, setStandaloneType] = useState<StandaloneType>(checkStandaloneType);
@@ -155,10 +171,7 @@ export const App: React.FC = () => {
             <UiFlex justify="between" align="center" wrap gap={12}>
               <div
                 className="app-brand"
-                onClick={() => {
-                  window.location.hash = "#review";
-                  setStandaloneType(null);
-                }}
+                onClick={() => navigateToApp(false)}
                 style={{ cursor: "pointer" }}
               >
                 <div className="app-brand-icon">
@@ -177,11 +190,7 @@ export const App: React.FC = () => {
                 <UiButton
                   size="sm"
                   variant="dim"
-                  onClick={() => {
-                    window.location.hash = "#review";
-                    setStandaloneType(null);
-                    openAuthModal();
-                  }}
+                  onClick={() => navigateToApp(true)}
                 >
                   Entrar
                 </UiButton>
@@ -207,10 +216,7 @@ export const App: React.FC = () => {
             <UiFlex justify="between" align="center" wrap gap={12}>
               <div
                 className="app-brand"
-                onClick={() => {
-                  window.location.hash = "#review";
-                  setStandaloneType(null);
-                }}
+                onClick={() => navigateToApp(false)}
                 style={{ cursor: "pointer" }}
               >
                 <div className="app-brand-icon">
@@ -229,11 +235,7 @@ export const App: React.FC = () => {
                 <UiButton
                   size="sm"
                   variant="dim"
-                  onClick={() => {
-                    window.location.hash = "#review";
-                    setStandaloneType(null);
-                    openAuthModal();
-                  }}
+                  onClick={() => navigateToApp(true)}
                 >
                   Entrar
                 </UiButton>

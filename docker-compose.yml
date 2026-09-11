@@ -16,6 +16,8 @@ services:
       - DOMJUDGE_ADMIN_PASSWORD=${DOMJUDGE_ADMIN_PASSWORD:-}
       - WIZARD_ADMIN_LABEL=${WIZARD_ADMIN_LABEL:-admin}
       - SESSION_EXPIRATION_DAYS=${SESSION_EXPIRATION_DAYS:-7}
+      - ENABLE_DEMO_MODE=${ENABLE_DEMO_MODE:-true}
+      - BASE_PATH=${BASE_PATH:-}
     volumes:
       - ./data:/app/data
     env_file:

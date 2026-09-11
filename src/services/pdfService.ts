@@ -1,5 +1,6 @@
 import { marked } from "marked";
 import { TestCase } from "@/types/domjudge";
+import { apiPath } from "./apiClient";
 
 export interface ProblemPdfData {
   title: string;
@@ -116,7 +117,7 @@ export async function generateProblemPdf(data: ProblemPdfData): Promise<Blob> {
 </body>
 </html>`;
 
-  const res = await fetch("/api/pdf", {
+  const res = await fetch(apiPath("/api/pdf"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 
 export default defineConfig({
+  base: "./",
   plugins: [
     react(),
     {
@@ -11,11 +12,11 @@ export default defineConfig({
         server.middlewares.use((req, _res, next) => {
           const url = req.url ? req.url.split("?")[0] : "";
           if (
-            url === "/trocar-senha" ||
-            url === "/change-password" ||
-            url === "/cadastro" ||
-            url === "/register" ||
-            url === "/criar-conta"
+            url.endsWith("/trocar-senha") ||
+            url.endsWith("/change-password") ||
+            url.endsWith("/cadastro") ||
+            url.endsWith("/register") ||
+            url.endsWith("/criar-conta")
           ) {
             req.url = "/index.html";
           }

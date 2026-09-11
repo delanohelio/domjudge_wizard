@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { ApiCredentials, AuthUser, LoginResponse } from "@/types/domjudge";
+import { apiPath } from "@/services/apiClient";
 
 interface StoredSession {
   token: string;
@@ -15,6 +16,7 @@ export interface AuthContextType {
   credentials: ApiCredentials;
   isAuthenticated: boolean;
   isDemo: boolean;
+  isDemoAllowed: boolean;
   isAuthModalOpen: boolean;
   login: (
     userOrApiBase: string,
@@ -36,11 +38,13 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 declare global {
   interface Window {
     __ENV__?: {
+      BASE_PATH?: string;
       DOMJUDGE_API_URL?: string;
       DOMJUDGE_API_BASE?: string;
       WIZARD_ADMIN_LABEL?: string;
       SESSION_EXPIRATION_DAYS?: number;
       STORAGE_EXPIRATION_DAYS?: number;
+      ENABLE_DEMO_MODE?: boolean | string;
     };
   }
 }
@@ -49,6 +53,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const env = (typeof window !== "undefined" && window.__ENV__) || {};
   const defaultApiBase = env.DOMJUDGE_API_URL || env.DOMJUDGE_API_BASE || "https://coderunner.cin.ufpe.br/api/v4";
   const expirationDays = Number(env.SESSION_EXPIRATION_DAYS) || Number(env.STORAGE_EXPIRATION_DAYS) || 7;
+  const isDemoAllowed =
+    env.ENABLE_DEMO_MODE !== false &&
+    String(env.ENABLE_DEMO_MODE).toLowerCase() !== "false" &&
+    String(env.ENABLE_DEMO_MODE) !== "0";
 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -64,14 +72,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const isStandaloneRoute = (): boolean => {
     if (typeof window === "undefined") return false;
-    const p = window.location.pathname.toLowerCase();
+    const p = window.location.pathname.toLowerCase().replace(/\/+$/, "");
     const h = window.location.hash.toLowerCase();
     return (
-      p === "/trocar-senha" ||
-      p === "/change-password" ||
-      p === "/cadastro" ||
-      p === "/register" ||
-      p === "/criar-conta" ||
+      p.endsWith("/trocar-senha") ||
+      p.endsWith("/change-password") ||
+      p.endsWith("/cadastro") ||
+      p.endsWith("/register") ||
+      p.endsWith("/criar-conta") ||
       h === "#trocar-senha" ||
       h === "#change-password" ||
       h === "#cadastro" ||
@@ -110,7 +118,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setIsAuthModalOpen(false);
 
           // Verificar sessão ativa em segundo plano
-          fetch("/api/auth/me", {
+          fetch(apiPath("/api/auth/me"), {
             headers: { Authorization: `Bearer ${parsed.token}` },
           })
             .then((res) => {
@@ -156,7 +164,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch(apiPath("/api/auth/login"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
@@ -216,7 +224,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = () => {
     if (token) {
-      fetch("/api/auth/logout", {
+      fetch(apiPath("/api/auth/logout"), {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       }).catch(() => {});
@@ -239,6 +247,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const enableDemoMode = () => {
+    if (!isDemoAllowed) {
+      console.warn("Modo de demonstração desativado por configuração do sistema.");
+      return;
+    }
+
     const demoUser: AuthUser = {
       id: "demo_admin",
       username: "demo_admin",
@@ -286,6 +299,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         credentials,
         isAuthenticated: Boolean(user && credentials.isAuthenticated),
         isDemo,
+        isDemoAllowed,
         isAuthModalOpen,
         login,
         logout,

@@ -10,10 +10,28 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <!-- Injeção dinâmica de variáveis de ambiente do backend -->
-    <script src="/config.js"></script>
-    <script type="module" crossorigin src="/assets/index-DcmgF6oQ.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Ct7T7Yd6.css">
+    <!-- Injeção dinâmica de variáveis de ambiente do backend com suporte a subrota (BASE_PATH) -->
+    <script>
+      (function() {
+        var path = window.location.pathname || "";
+        var knownStandalone = ["/cadastro", "/register", "/criar-conta", "/trocar-senha", "/change-password"];
+        var basePath = "";
+        for (var i = 0; i < knownStandalone.length; i++) {
+          if (path.endsWith(knownStandalone[i])) {
+            basePath = path.substring(0, path.length - knownStandalone[i].length);
+            break;
+          }
+        }
+        if (!basePath && path && path !== "/") {
+          basePath = path.replace(/\/+$/, "");
+        }
+        window.__DETECTED_BASE_PATH__ = basePath;
+        var configUrl = (basePath ? basePath : "") + "/config.js";
+        document.write('<script src="' + configUrl + '"><\\/script>');
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/index-CSl9Vw3l.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BJmLx8GM.css">
   </head>
   <body>
     <div id="root"></div>

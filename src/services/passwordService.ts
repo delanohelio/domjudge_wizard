@@ -35,13 +35,15 @@ export function generateSecurePassword(length: number = 12): string {
   return passwordChars.join("");
 }
 
+import { apiPath } from "./apiClient";
+
 export async function submitChangePassword(payload: {
   username: string;
   currentPassword: string;
   newPassword: string;
   confirmPassword?: string;
 }): Promise<{ success: boolean; message?: string; error?: string }> {
-  const res = await fetch("/api/change-password", {
+  const res = await fetch(apiPath("/api/change-password"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

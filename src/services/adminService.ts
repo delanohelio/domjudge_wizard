@@ -3,6 +3,7 @@ import {
   LabelPermission,
   ValidateCodeResponse,
 } from "@/types/domjudge";
+import { apiPath } from "./apiClient";
 
 function getHeaders(token?: string): HeadersInit {
   const headers: Record<string, string> = {
@@ -17,7 +18,7 @@ function getHeaders(token?: string): HeadersInit {
 
 // 1. CÓDIGOS DE ACESSO
 export async function fetchAccessCodes(token?: string): Promise<AccessCode[]> {
-  const res = await fetch("/api/admin/codes", {
+  const res = await fetch(apiPath("/api/admin/codes"), {
     headers: getHeaders(token),
   });
   if (!res.ok) {
@@ -32,7 +33,7 @@ export async function createAccessCode(
   payload: Partial<AccessCode>,
   token?: string
 ): Promise<AccessCode> {
-  const res = await fetch("/api/admin/codes", {
+  const res = await fetch(apiPath("/api/admin/codes"), {
     method: "POST",
     headers: getHeaders(token),
     body: JSON.stringify(payload),
@@ -49,7 +50,7 @@ export async function updateAccessCode(
   payload: Partial<AccessCode>,
   token?: string
 ): Promise<AccessCode> {
-  const res = await fetch(`/api/admin/codes/${encodeURIComponent(id)}`, {
+  const res = await fetch(apiPath(`/api/admin/codes/${encodeURIComponent(id)}`), {
     method: "PUT",
     headers: getHeaders(token),
     body: JSON.stringify(payload),
@@ -62,7 +63,7 @@ export async function updateAccessCode(
 }
 
 export async function deleteAccessCode(id: string, token?: string): Promise<boolean> {
-  const res = await fetch(`/api/admin/codes/${encodeURIComponent(id)}`, {
+  const res = await fetch(apiPath(`/api/admin/codes/${encodeURIComponent(id)}`), {
     method: "DELETE",
     headers: getHeaders(token),
   });
@@ -75,7 +76,7 @@ export async function deleteAccessCode(id: string, token?: string): Promise<bool
 
 // 2. PERMISSÕES DE LABELS
 export async function fetchLabelPermissions(token?: string): Promise<LabelPermission[]> {
-  const res = await fetch("/api/admin/permissions", {
+  const res = await fetch(apiPath("/api/admin/permissions"), {
     headers: getHeaders(token),
   });
   if (!res.ok) {
@@ -90,7 +91,7 @@ export async function saveLabelPermissions(
   permissions: LabelPermission[],
   token?: string
 ): Promise<LabelPermission[]> {
-  const res = await fetch("/api/admin/permissions", {
+  const res = await fetch(apiPath("/api/admin/permissions"), {
     method: "POST",
     headers: getHeaders(token),
     body: JSON.stringify({ permissions }),
@@ -105,7 +106,7 @@ export async function saveLabelPermissions(
 // 3. AUTO-CADASTRO E VALIDAÇÃO PÚBLICA
 export async function validateAccessCode(code: string): Promise<ValidateCodeResponse> {
   const clean = encodeURIComponent(String(code || "").trim().toUpperCase());
-  const res = await fetch(`/api/register/validate/${clean}`);
+  const res = await fetch(apiPath(`/api/register/validate/${clean}`));
   const data = await res.json();
   return data;
 }
@@ -118,7 +119,7 @@ export async function registerWithCode(payload: {
   password: string;
   confirmPassword?: string;
 }): Promise<{ success: boolean; message?: string; error?: string; username?: string }> {
-  const res = await fetch("/api/register", {
+  const res = await fetch(apiPath("/api/register"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
