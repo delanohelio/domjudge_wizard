@@ -133,11 +133,24 @@ export async function generateProblemHtml(data: ProblemPdfData): Promise<string>
 export async function generateProblemPdf(data: ProblemPdfData): Promise<Blob> {
   const fullHtml = await generateProblemHtml(data);
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  try {
+    const raw = sessionStorage.getItem("domjudge_wizard_session") || localStorage.getItem("domjudge_wizard_session");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed?.token) {
+        headers["Authorization"] = `Bearer ${parsed.token}`;
+        headers["X-Session-Token"] = parsed.token;
+      }
+    }
+  } catch {}
+
   const res = await fetch(apiPath("/api/pdf"), {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify({
       html: fullHtml,
       title: data.title || "problema",

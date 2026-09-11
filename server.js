@@ -198,6 +198,22 @@ async function getBrowser() {
 
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
     launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  } else {
+    const candidatePaths = [
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium-browser",
+      "/usr/bin/chromium",
+    ];
+    for (const cp of candidatePaths) {
+      if (fs.existsSync(cp)) {
+        launchOptions.executablePath = cp;
+        break;
+      }
+    }
   }
 
   browserInstance = await puppeteer.launch(launchOptions);
@@ -711,12 +727,15 @@ app.patch("/api/admin/users/:username", requireAuth, requireUsersPermission, asy
       body: fdTeams,
     });
 
-    // 2. Determinar roles do DOMjudge
+    // 2. Determinar roles e tipo do DOMjudge
     let roles = ["team"];
     if (cleanRole === "admin") roles = ["admin", "jury", "team"];
     else if (cleanRole === "professor" || cleanRole === "monitor") roles = ["jury", "team"];
 
+    // No DOMjudge, usuários associados a um time (que armazena as labels e turmas)
+    // devem ter type: 'team' no POST /users/accounts para evitar conflito de duplicidade de externalid.
     const accountPayload = {
+      type: "team",
       username: cleanUsername,
       name: name || cleanUsername,
       email: email || null,
@@ -757,13 +776,17 @@ app.post("/api/admin/users/batch", requireAuth, requireUsersPermission, async (r
 
     const { apiBase, adminAuthHeader } = getAdminCredentials();
 
-    // Obter times atuais do DOMjudge
-    const resTeams = await fetch(`${apiBase}/teams`, {
-      headers: { Authorization: adminAuthHeader, Accept: "application/json" },
-    });
+    // Obter usuários e times atuais do DOMjudge para preservar roles e tipos
+    const [resUsers, resTeams] = await Promise.all([
+      fetch(`${apiBase}/users`, { headers: { Authorization: adminAuthHeader, Accept: "application/json" } }),
+      fetch(`${apiBase}/teams`, { headers: { Authorization: adminAuthHeader, Accept: "application/json" } }),
+    ]);
+    const users = resUsers.ok ? await resUsers.json() : [];
     const teams = resTeams.ok ? await resTeams.json() : [];
+    const usersMap = new Map();
+    users.forEach((u) => usersMap.set(String(u.username || u.id).toLowerCase(), u));
     const teamsMap = new Map();
-    teams.forEach((t) => teamsMap.set(String(t.id), t));
+    teams.forEach((t) => teamsMap.set(String(t.id).toLowerCase(), t));
 
     const teamsToUpdate = [];
     const accountsToUpdate = [];
@@ -771,7 +794,10 @@ app.post("/api/admin/users/batch", requireAuth, requireUsersPermission, async (r
 
     for (const rawU of usernames) {
       const u = String(rawU).trim();
-      const existingTeam = teamsMap.get(u);
+      const lowerU = u.toLowerCase();
+      const existingTeam = teamsMap.get(lowerU);
+      const existingUser = usersMap.get(lowerU);
+
       let currentLabels = [];
       if (existingTeam) {
         if (Array.isArray(existingTeam.labels)) currentLabels = [...existingTeam.labels];
@@ -790,7 +816,7 @@ app.post("/api/admin/users/batch", requireAuth, requireUsersPermission, async (r
         }
       } else if (action === "remove_turma") {
         const turma = String(value || "").trim().toLowerCase();
-        currentLabels = currentLabels.filter((l) => l.toLowerCase() !== turma && l.toLowerCase() !== u);
+        currentLabels = currentLabels.filter((l) => l.toLowerCase() !== turma && l.toLowerCase() !== lowerU);
         currentLabels.unshift(u);
         teamModified = true;
       } else if (action === "set_role") {
@@ -803,17 +829,27 @@ app.post("/api/admin/users/batch", requireAuth, requireUsersPermission, async (r
         if (newRole === "admin") roles = ["admin", "jury", "team"];
         else if (newRole === "professor" || newRole === "monitor") roles = ["jury", "team"];
 
+        const isAdmin = roles.includes("admin");
+        const isJury = roles.includes("jury");
+        const type = isAdmin ? "admin" : (isJury ? "jury" : "team");
+
         accountsToUpdate.push({
+          type: "team",
           username: u,
-          name: existingTeam ? existingTeam.name : u,
+          name: existingUser?.name || existingTeam?.name || u,
           team_id: u,
           roles,
+          enabled: existingUser?.enabled !== false,
         });
       } else if (action === "set_status") {
+        const userRoles = (existingUser && existingUser.roles) || ["team"];
+
         accountsToUpdate.push({
+          type: "team",
           username: u,
-          name: existingTeam ? existingTeam.name : u,
+          name: existingUser?.name || existingTeam?.name || u,
           team_id: u,
+          roles: userRoles,
           enabled: Boolean(value),
         });
       }
@@ -832,7 +868,7 @@ app.post("/api/admin/users/batch", requireAuth, requireUsersPermission, async (r
       if (removeTurmas && Array.isArray(removeTurmas)) {
         for (const t of removeTurmas) {
           const cleanT = String(t).trim().toLowerCase();
-          currentLabels = currentLabels.filter((l) => l.toLowerCase() !== cleanT && l.toLowerCase() !== u);
+          currentLabels = currentLabels.filter((l) => l.toLowerCase() !== cleanT && l.toLowerCase() !== lowerU);
           currentLabels.unshift(u);
           teamModified = true;
         }
@@ -849,18 +885,22 @@ app.post("/api/admin/users/batch", requireAuth, requireUsersPermission, async (r
         else if (cleanR === "professor" || cleanR === "monitor") roles = ["jury", "team"];
 
         accountsToUpdate.push({
+          type: "team",
           username: u,
-          name: existingTeam ? existingTeam.name : u,
+          name: existingUser?.name || existingTeam?.name || u,
           team_id: u,
           roles,
+          enabled: typeof setEnabled === "boolean" ? setEnabled : (existingUser?.enabled !== false),
         });
-      }
+      } else if (typeof setEnabled === "boolean") {
+        const userRoles = (existingUser && existingUser.roles) || ["team"];
 
-      if (typeof setEnabled === "boolean") {
         accountsToUpdate.push({
+          type: "team",
           username: u,
-          name: existingTeam ? existingTeam.name : u,
+          name: existingUser?.name || existingTeam?.name || u,
           team_id: u,
+          roles: userRoles,
           enabled: setEnabled,
         });
       }
@@ -1270,7 +1310,7 @@ app.all("/api/domjudge/*", requireAuth, checkDomjudgeProxyPermission, async (req
 // SERVIÇO PUPPETEER PDF
 // ==============================================================================
 
-app.post("/api/pdf", async (req, res) => {
+app.post(["/api/pdf", "/pdf"], async (req, res) => {
   let page = null;
   try {
     const { html, title } = req.body;

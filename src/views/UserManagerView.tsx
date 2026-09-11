@@ -78,6 +78,7 @@ export const UserManagerView: React.FC = () => {
 
   // Filtros
   const [filterText, setFilterText] = useState("");
+  const [isMultilineSearch, setIsMultilineSearch] = useState(false);
   const [filterRole, setFilterRole] = useState("all");
   const [filterTurma, setFilterTurma] = useState("all");
   const [filterEnabled, setFilterEnabled] = useState("all");
@@ -143,12 +144,33 @@ export const UserManagerView: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  // Parser de termos de busca (permite separar por vírgula, ponto-e-vírgula ou quebras de linha para OR)
+  const searchTerms = useMemo(() => {
+    return filterText
+      .split(/[\n,;]+/)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+  }, [filterText]);
+
   // Filtragem
   const filteredUsers = useMemo(() => {
     return users.filter((u) => {
-      if (filterText) {
-        const text = `${u.username} ${u.name || ""} ${u.email || ""}`.toLowerCase();
-        if (!text.includes(filterText.toLowerCase())) return false;
+      if (searchTerms.length > 0) {
+        const uUsername = (u.username || "").toLowerCase();
+        const uName = (u.name || "").toLowerCase();
+        const uEmail = (u.email || "").toLowerCase();
+        const uCombined = `${uUsername} ${uName} ${uEmail}`;
+
+        // Regra OR: usuário é exibido se coincidir com qualquer um dos termos pesquisados
+        const matchesAny = searchTerms.some(
+          (term) =>
+            uUsername === term ||
+            uUsername.includes(term) ||
+            uName.includes(term) ||
+            uEmail.includes(term) ||
+            uCombined.includes(term)
+        );
+        if (!matchesAny) return false;
       }
       if (filterRole !== "all") {
         if (u.roleLabel?.toLowerCase() !== filterRole.toLowerCase()) return false;
@@ -165,7 +187,7 @@ export const UserManagerView: React.FC = () => {
       }
       return true;
     });
-  }, [users, filterText, filterRole, filterTurma, filterEnabled]);
+  }, [users, searchTerms, filterRole, filterTurma, filterEnabled]);
 
   // Ordenação
   const sortedUsers = useMemo(() => {
@@ -571,17 +593,90 @@ export const UserManagerView: React.FC = () => {
 
         <UiCardContent>
           <UiStack gap={16}>
-            <UiGrid columns={4} gap={14}>
-              <UiTextInput
-                label="Buscar Usuários"
-                placeholder="Nome, username ou email..."
-                value={filterText}
-                onChange={(e) => {
-                  setFilterText(e.target.value);
-                  setPage(1);
-                }}
-                startIcon={<Search size={16} />}
-              />
+            {/* Campo de Busca em Lote / Texto Grande Expandido */}
+            {isMultilineSearch && (
+              <UiCard variant="subtle" style={{ padding: 14 }}>
+                <UiStack gap={10}>
+                  <UiFlex justify="between" align="center" wrap gap={8}>
+                    <UiFlex gap={8} align="center">
+                      <Search size={16} className="text-brand" />
+                      <span className="font-bold text-sm">Busca Rápida de Usuários (Texto Grande / OR)</span>
+                      {searchTerms.length > 0 && (
+                        <UiBadge variant="brand" size="sm">
+                          {searchTerms.length} {searchTerms.length === 1 ? "termo ativo" : "termos OR ativos"}
+                        </UiBadge>
+                      )}
+                    </UiFlex>
+
+                    <UiFlex gap={8} align="center">
+                      {filterText && (
+                        <UiButton
+                          size="sm"
+                          variant="dim"
+                          onClick={() => {
+                            setFilterText("");
+                            setPage(1);
+                          }}
+                        >
+                          Limpar
+                        </UiButton>
+                      )}
+                      <UiButton
+                        size="sm"
+                        variant="dim"
+                        onClick={() => setIsMultilineSearch(false)}
+                      >
+                        Recolher para Campo Simples
+                      </UiButton>
+                    </UiFlex>
+                  </UiFlex>
+
+                  <UiTextarea
+                    rows={4}
+                    placeholder={"Cole aqui uma lista de usuários, logins ou e-mails separados por vírgula ou uma por linha (ex:\ndelano.oliveira\njoao.silva, maria.santos\n...)"}
+                    value={filterText}
+                    onChange={(e) => {
+                      setFilterText(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                  <span className="text-xs text-muted">
+                    Qualquer usuário que contenha um dos termos no login, nome ou e-mail será exibido (lógica OR).
+                  </span>
+                </UiStack>
+              </UiCard>
+            )}
+
+            <UiGrid columns={isMultilineSearch ? 3 : 4} gap={14}>
+              {!isMultilineSearch && (
+                <UiStack gap={4}>
+                  <UiFlex justify="between" align="center">
+                    <span className="text-xs font-semibold">Buscar Usuários (OR por vírgula)</span>
+                    <button
+                      type="button"
+                      className="text-xs text-brand hover:underline font-semibold bg-transparent border-0 cursor-pointer p-0"
+                      onClick={() => setIsMultilineSearch(true)}
+                      title="Expandir caixa de texto para colar muitos usuários de uma vez"
+                    >
+                      + Texto Grande
+                    </button>
+                  </UiFlex>
+                  <UiTextInput
+                    placeholder="delano, joao, maria..."
+                    value={filterText}
+                    onChange={(e) => {
+                      setFilterText(e.target.value);
+                      setPage(1);
+                    }}
+                    startIcon={<Search size={16} />}
+                  />
+                  {searchTerms.length > 1 && (
+                    <span className="text-xs text-brand font-medium">
+                      ✓ {searchTerms.length} termos de busca ativos (OR)
+                    </span>
+                  )}
+                </UiStack>
+              )}
 
               <UiSelect
                 label="Filtrar por Papel"

@@ -13,9 +13,10 @@ export function getBasePath(): string {
   if (typeof window === "undefined") return "";
 
   // 1. Variável de ambiente pública injetada pelo backend (/config.js)
-  const envBase = window.__ENV__?.BASE_PATH;
-  if (envBase !== undefined && envBase !== null && String(envBase).trim() !== "") {
-    const clean = String(envBase).trim().replace(/^\/+|\/+$/g, "");
+  if (window.__ENV__ && window.__ENV__.BASE_PATH !== undefined && window.__ENV__.BASE_PATH !== null) {
+    const envBase = String(window.__ENV__.BASE_PATH).trim();
+    if (envBase === "") return "";
+    const clean = envBase.replace(/^\/+|\/+$/g, "");
     return clean ? `/${clean}` : "";
   }
 
@@ -27,12 +28,24 @@ export function getBasePath(): string {
   // 3. Fallback inteligente a partir do pathname atual
   const p = window.location.pathname || "/";
   const parts = p.split("/").filter(Boolean);
-  if (
-    parts.length > 0 &&
-    !["cadastro", "register", "trocar-senha", "change-password", "criar-conta", "api", "assets"].includes(
-      parts[0].toLowerCase()
-    )
-  ) {
+  const knownViews = [
+    "review",
+    "creator",
+    "problems",
+    "contests",
+    "users",
+    "codes",
+    "permissions",
+    "trocar-senha",
+    "change-password",
+    "cadastro",
+    "register",
+    "criar-conta",
+    "api",
+    "assets",
+    "pdf",
+  ];
+  if (parts.length > 0 && !knownViews.includes(parts[0].toLowerCase())) {
     return `/${parts[0]}`;
   }
 
