@@ -322,7 +322,11 @@ export class DomjudgeApiService {
   }
 
   // 10. Upload Problem Zip (Suporta envio para Lista ou Banco Geral Avulso)
-  async uploadProblemZip(contestId: string | null | undefined, zipBlob: Blob): Promise<any> {
+  async uploadProblemZip(
+    contestId: string | null | undefined,
+    zipBlob: Blob,
+    problemSlug?: string
+  ): Promise<any> {
     if (this.creds.isDemo) {
       return { success: true, problem_id: "demo-prob-1" };
     }
@@ -334,7 +338,12 @@ export class DomjudgeApiService {
     const url = apiPath(`/api/domjudge${cleanPath}`);
 
     const fd = new FormData();
-    fd.append("zip", zipBlob, "problem.zip");
+    const filename = problemSlug
+      ? `${problemSlug}.zip`
+      : zipBlob instanceof File && zipBlob.name
+      ? zipBlob.name
+      : "problem.zip";
+    fd.append("zip", zipBlob, filename);
 
     const res = await fetch(url, {
       method: "POST",
@@ -345,7 +354,21 @@ export class DomjudgeApiService {
     });
 
     if (!res.ok) {
-      const errTxt = await res.text().catch(() => "");
+      if (res.status === 413) {
+        const sizeMb = (zipBlob.size / (1024 * 1024)).toFixed(2);
+        throw new Error(
+          `O pacote do exercício (${sizeMb} MB) excedeu o limite máximo aceito pelo servidor do DOMjudge (HTTP 413: Payload Too Large).\n` +
+            `O servidor Nginx do DOMjudge está configurado com o limite padrão de 1MB ('client_max_body_size 1m').\n` +
+            `Para aceitar pacotes maiores, configure 'client_max_body_size 128M;' no Nginx do servidor DOMjudge ou reduza o tamanho dos testes/anexos.`
+        );
+      }
+      let errTxt = "";
+      try {
+        const json = await res.json();
+        errTxt = json.error || json.message || JSON.stringify(json);
+      } catch {
+        errTxt = await res.text().catch(() => "");
+      }
       throw new Error(`Falha no upload do problema (${res.status}): ${errTxt}`);
     }
     return res.json().catch(() => ({ success: true }));

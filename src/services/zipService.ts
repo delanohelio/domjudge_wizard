@@ -24,7 +24,8 @@ limits:
   zip.file("problem.yaml", yamlContent);
 
   // 2. domjudge-problem.ini
-  const iniContent = `timelimit = '${data.timeLimit || 1}'
+  const iniContent = `short-name = '${data.problemId || "problem"}'
+timelimit = '${data.timeLimit || 1}'
 color = '#6366f1'
 `;
   zip.file("domjudge-problem.ini", iniContent);
@@ -58,7 +59,13 @@ color = '#6366f1'
     }
   });
 
-  return zip.generateAsync({ type: "blob" });
+  return zip.generateAsync({
+    type: "blob",
+    compression: "DEFLATE",
+    compressionOptions: {
+      level: 9,
+    },
+  });
 }
 
 export interface ParsedProblemZip {

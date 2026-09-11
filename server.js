@@ -783,6 +783,14 @@ app.all("/api/domjudge/*", requireAuth, checkDomjudgeProxyPermission, async (req
       return res.end();
     }
 
+    if (domjudgeRes.status === 413) {
+      return res.status(413).json({
+        success: false,
+        error:
+          "O pacote do exercício excedeu o limite máximo de upload aceito pelo servidor do DOMjudge (HTTP 413: Payload Too Large). O servidor Nginx do DOMjudge está configurado com o limite padrão de 1MB ('client_max_body_size 1m'). Para permitir arquivos maiores, configure 'client_max_body_size 128M;' no Nginx do servidor DOMjudge ou reduza o tamanho dos testes/anexos.",
+      });
+    }
+
     if (contentType.includes("application/json")) {
       const data = await domjudgeRes.json();
       return res.json(data);
@@ -792,6 +800,17 @@ app.all("/api/domjudge/*", requireAuth, checkDomjudgeProxyPermission, async (req
     }
   } catch (err) {
     console.error("Erro no proxy do DOMjudge:", err.message);
+    if (
+      err.message.includes("ECONNRESET") ||
+      err.message.includes("aborted") ||
+      err.message.includes("fetch failed") ||
+      err.message.includes("other side closed")
+    ) {
+      return res.status(502).json({
+        success: false,
+        error: `Conexão encerrada pelo servidor DOMjudge (${err.message}). Se você estava enviando um exercício com casos de teste volumosos, o Nginx do servidor pode ter rejeitado a requisição por exceder o limite 'client_max_body_size'.`,
+      });
+    }
     res.status(502).json({ success: false, error: `Falha na ponte com DOMjudge: ${err.message}` });
   }
 });

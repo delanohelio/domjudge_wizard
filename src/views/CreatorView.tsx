@@ -367,7 +367,7 @@ export const CreatorView: React.FC = () => {
         testCases,
       });
 
-      await api.uploadProblemZip(targetContestId || null, zipBlob);
+      await api.uploadProblemZip(targetContestId || null, zipBlob, problemId);
       showToast(
         isUnlinked
           ? `Exercício '${title}' cadastrado com sucesso no Banco Geral do DOMjudge!`
