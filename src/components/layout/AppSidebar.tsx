@@ -3,6 +3,7 @@ import {
   GraduationCap,
   BarChart3,
   BookOpen,
+  FileText,
   PenTool,
   KeyRound,
   Users,
@@ -63,6 +64,11 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       title: "Elaboração de Conteúdo",
       items: [
         {
+          id: "problems",
+          label: "Banco de Questões",
+          icon: <FileText size={18} />,
+        },
+        {
           id: "creator",
           label: "Studio de Exercícios",
           icon: <PenTool size={18} />,
@@ -79,7 +85,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
         },
         {
           id: "users",
-          label: "Alunos Matriculados",
+          label: "Usuários Cadastrados",
           icon: <Users size={18} />,
         },
         {

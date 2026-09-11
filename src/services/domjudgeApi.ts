@@ -86,6 +86,12 @@ export class DomjudgeApiService {
       formal_name: data.formal_name || data.name,
       shortname: data.shortname || data.id,
       start_time: data.start_time,
+      public: false,
+      process_balloons: false,
+      medals_enabled: false,
+      scoreboard_type: "pass-fail",
+      penalty_time: 0,
+      allow_submit: true,
     };
 
     if (data.duration) {
@@ -239,12 +245,147 @@ export class DomjudgeApiService {
     return created;
   }
 
-  // 2. Problems
+  // 2. Problems & Problem Bank
   async getProblems(contestId?: string): Promise<Problem[]> {
     if (contestId) {
       return this.request<Problem[]>(`/contests/${encodeURIComponent(contestId)}/problems`);
     }
-    return this.request<Problem[]>("/problems");
+    // Para obter todos os problemas sem contestId, consultar o Banco de Questões
+    try {
+      const res = await fetch(apiPath("/api/problem-bank"), {
+        headers: this.getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.problems || [];
+      }
+    } catch (err) {
+      console.warn("Aviso ao buscar banco de questões:", err);
+    }
+    return this.request<Problem[]>("/problems").catch(() => []);
+  }
+
+  async getProblemBank(): Promise<any[]> {
+    const res = await fetch(apiPath("/api/problem-bank"), {
+      headers: this.getAuthHeaders(),
+    });
+    if (!res.ok) throw new Error("Falha ao carregar banco de questões.");
+    const data = await res.json();
+    return data.problems || [];
+  }
+
+  async saveProblemToBank(problemData: any): Promise<any> {
+    const res = await fetch(apiPath("/api/problem-bank"), {
+      method: "POST",
+      headers: {
+        ...this.getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(problemData),
+    });
+    if (!res.ok) throw new Error("Falha ao salvar exercício no banco.");
+    return res.json();
+  }
+
+  async getContestAudience(contestId?: string): Promise<any> {
+    try {
+      const id = contestId || "all";
+      const res = await fetch(apiPath(`/api/contests/${encodeURIComponent(id)}/audience`), {
+        headers: this.getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (id === "all") {
+          return data;
+        }
+        return data.audienceRule || "";
+      }
+    } catch {}
+    return contestId ? "" : { rules: {} };
+  }
+
+  async saveContestAudience(contestId: string, rule: string): Promise<any> {
+    const res = await fetch(apiPath(`/api/contests/${encodeURIComponent(contestId)}/audience`), {
+      method: "POST",
+      headers: {
+        ...this.getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ rule }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Falha ao salvar regra de público." }));
+      throw new Error(err.error || "Regra de público inválida.");
+    }
+    return res.json();
+  }
+
+  async getAllLabels(): Promise<{ roles: string[]; turmas: string[]; all: string[] }> {
+    try {
+      const res = await fetch(apiPath("/api/labels/all"), {
+        headers: this.getAuthHeaders(),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch {}
+    return { roles: [], turmas: [], all: [] };
+  }
+
+  async getAdminUsers(): Promise<{ users: any[]; roles: string[]; turmas: string[] }> {
+    const res = await fetch(apiPath("/api/admin/users"), {
+      headers: this.getAuthHeaders(),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Falha ao carregar usuários cadastrados." }));
+      throw new Error(err.error || "Falha ao carregar usuários.");
+    }
+    const data = await res.json();
+    return {
+      users: data.users || [],
+      roles: data.roles || ["aluno", "professor", "monitor", "admin"],
+      turmas: data.turmas || [],
+    };
+  }
+
+  async updateAdminUser(username: string, payload: any): Promise<any> {
+    const res = await fetch(apiPath(`/api/admin/users/${encodeURIComponent(username)}`), {
+      method: "PATCH",
+      headers: {
+        ...this.getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Falha ao atualizar usuário." }));
+      throw new Error(err.error || "Falha ao atualizar usuário.");
+    }
+    return res.json();
+  }
+
+  async batchAdminUsers(payload: {
+    usernames: string[];
+    action?: string;
+    value?: any;
+    setRole?: string;
+    addTurmas?: string[];
+    removeTurmas?: string[];
+    setEnabled?: boolean;
+  }): Promise<any> {
+    const res = await fetch(apiPath("/api/admin/users/batch"), {
+      method: "POST",
+      headers: {
+        ...this.getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Falha ao processar lote de usuários." }));
+      throw new Error(err.error || "Falha ao processar lote.");
+    }
+    return res.json();
   }
 
   // 3. Submissions

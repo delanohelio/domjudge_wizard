@@ -3,6 +3,7 @@ import {
   Search,
   BookOpen,
   BarChart3,
+  FileText,
   PenTool,
   KeyRound,
   Users,
@@ -87,6 +88,21 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           },
         ]
       : []),
+    ...(canAccessPage("problems")
+      ? [
+          {
+            id: "nav-problems",
+            title: "Banco de Questões",
+            subtitle: "Visualizar, editar enunciados, exportar PDF e HTML",
+            category: "Navegação" as const,
+            icon: <FileText size={16} />,
+            onSelect: () => {
+              onNavigate("problems");
+              onClose();
+            },
+          },
+        ]
+      : []),
     ...(canAccessPage("creator")
       ? [
           {
@@ -121,8 +137,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       ? [
           {
             id: "nav-users",
-            title: "Alunos Matriculados",
-            subtitle: "Gestão de contas e equipes individuais",
+            title: "Usuários Cadastrados",
+            subtitle: "Gestão de contas, turmas e papéis individuais ou em lote",
             category: "Navegação" as const,
             icon: <Users size={16} />,
             onSelect: () => {

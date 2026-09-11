@@ -139,7 +139,7 @@ function evaluatePermissions(userData, teamLabels) {
     return {
       isAuthorized: true,
       isAdmin: true,
-      allowedPages: ["review", "creator", "contests", "users", "codes", "permissions", "trocar-senha"],
+      allowedPages: ["review", "creator", "problems", "contests", "users", "codes", "permissions", "trocar-senha"],
     };
   }
 
@@ -152,7 +152,7 @@ function evaluatePermissions(userData, teamLabels) {
         return {
           isAuthorized: true,
           isAdmin: true,
-          allowedPages: ["review", "creator", "contests", "users", "codes", "permissions", "trocar-senha"],
+          allowedPages: ["review", "creator", "problems", "contests", "users", "codes", "permissions", "trocar-senha"],
         };
       }
       (perm.allowedPages || []).forEach((page) => allowedPagesSet.add(page));
@@ -160,6 +160,9 @@ function evaluatePermissions(userData, teamLabels) {
   }
 
   if (allowedPagesSet.size > 0) {
+    if (allowedPagesSet.has("creator")) {
+      allowedPagesSet.add("problems");
+    }
     allowedPagesSet.add("trocar-senha");
     return {
       isAuthorized: true,
@@ -461,6 +464,449 @@ app.delete("/api/admin/codes/:id", requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
+// Middleware de permissão para gestão de usuários e banco
+function requireUsersPermission(req, res, next) {
+  const user = req.currentUser;
+  if (!user) return res.status(401).json({ success: false, error: "Sessão inválida." });
+  const { adminLabel } = getAdminCredentials();
+  const isAdmin =
+    user.isAdmin === true ||
+    (Array.isArray(user.roles) && user.roles.includes("admin")) ||
+    (Array.isArray(user.labels) && user.labels.map((l) => String(l).toLowerCase()).includes(adminLabel));
+  if (isAdmin || (Array.isArray(user.allowedPages) && user.allowedPages.includes("users"))) {
+    return next();
+  }
+  return res.status(403).json({ success: false, error: "Permissão de gerenciamento de usuários ('users') necessária." });
+}
+
+// ==============================================================================
+// BANCO DE QUESTÕES / EXERCÍCIOS
+// ==============================================================================
+
+app.get("/api/problem-bank", requireAuth, async (req, res) => {
+  try {
+    const bankProblems = storage.getProblemsBank();
+    const { apiBase, adminAuthHeader } = getAdminCredentials();
+
+    let djProblems = [];
+    try {
+      const resContests = await fetch(`${apiBase}/contests`, {
+        headers: { Authorization: adminAuthHeader, Accept: "application/json" },
+      });
+      if (resContests.ok) {
+        const contests = await resContests.json();
+        for (const c of contests) {
+          try {
+            const resP = await fetch(`${apiBase}/contests/${encodeURIComponent(c.id)}/problems`, {
+              headers: { Authorization: adminAuthHeader, Accept: "application/json" },
+            });
+            if (resP.ok) {
+              const pList = await resP.json();
+              if (Array.isArray(pList)) {
+                pList.forEach((p) => {
+                  djProblems.push({ ...p, contestId: c.id, contestName: c.name });
+                });
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.warn("Aviso ao enriquecer banco com questões de contests:", e.message);
+    }
+
+    const mergedMap = new Map();
+    bankProblems.forEach((p) => {
+      mergedMap.set(p.id, {
+        ...p,
+        title: p.title || p.name || p.id,
+        name: p.title || p.name || p.id,
+        linkedContests: Array.isArray(p.linkedContests) ? p.linkedContests : [],
+      });
+    });
+
+    djProblems.forEach((p) => {
+      if (mergedMap.has(p.id)) {
+        const existing = mergedMap.get(p.id);
+        const contests = new Set(existing.linkedContests || []);
+        if (p.contestId) contests.add(p.contestId);
+        existing.linkedContests = Array.from(contests);
+        if (!existing.title && p.name) existing.title = p.name;
+        if (!existing.timeLimit && p.time_limit) existing.timeLimit = p.time_limit;
+      } else {
+        mergedMap.set(p.id, {
+          id: p.id,
+          title: p.name || p.id,
+          name: p.name || p.id,
+          timeLimit: p.time_limit || 1,
+          memoryLimit: 524288,
+          linkedContests: p.contestId ? [p.contestId] : [],
+          testCases: [],
+        });
+      }
+    });
+
+    res.json({ success: true, problems: Array.from(mergedMap.values()) });
+  } catch (err) {
+    console.error("Erro ao listar banco de questões:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/problem-bank", requireAuth, (req, res) => {
+  try {
+    const { id, title, timeLimit, memoryLimit, markdownContent, testCases, linkedContests } = req.body || {};
+    if (!id || !title) {
+      return res.status(400).json({ success: false, error: "ID e título são obrigatórios." });
+    }
+    const saved = storage.saveProblemToBank({
+      id: String(id).trim(),
+      title: String(title).trim(),
+      name: String(title).trim(),
+      timeLimit: Number(timeLimit) || 1,
+      memoryLimit: Number(memoryLimit) || 524288,
+      markdownContent: markdownContent || "",
+      testCases: Array.isArray(testCases) ? testCases : [],
+      linkedContests: Array.isArray(linkedContests) ? linkedContests : [],
+    });
+    res.json({ success: true, problem: saved });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get("/api/problem-bank/:id", requireAuth, (req, res) => {
+  const p = storage.getProblemFromBank(req.params.id);
+  if (!p) {
+    return res.status(404).json({ success: false, error: "Exercício não encontrado no banco de questões." });
+  }
+  res.json({ success: true, problem: p });
+});
+
+// ==============================================================================
+// REGRAS DE PÚBLICO-ALVO POR LISTA & AUTOCOMPLETE DE LABELS
+// ==============================================================================
+
+app.get("/api/contests/:id/audience", requireAuth, (req, res) => {
+  const rules = storage.getContestAudienceRules();
+  if (req.params.id === "all") {
+    return res.json({ success: true, rules });
+  }
+  const rule = rules[req.params.id] || "";
+  res.json({ success: true, contestId: req.params.id, audienceRule: rule });
+});
+
+app.post("/api/contests/:id/audience", requireAuth, (req, res) => {
+  const { rule } = req.body || {};
+  const validation = storage.validateAudienceExpression(rule);
+  if (!validation.valid) {
+    return res.status(400).json({ success: false, error: validation.error });
+  }
+  storage.saveContestAudienceRule(req.params.id, rule);
+  res.json({ success: true, contestId: req.params.id, audienceRule: String(rule || "").trim() });
+});
+
+app.get("/api/labels/all", requireAuth, (req, res) => {
+  res.json({ success: true, ...storage.getAllKnownLabels() });
+});
+
+// ==============================================================================
+// GESTÃO AVANÇADA DE USUÁRIOS (PAPÉIS, TURMAS, EDIÇÃO INDIVIDUAL E EM LOTE)
+// ==============================================================================
+
+app.get("/api/admin/users", requireAuth, requireUsersPermission, async (req, res) => {
+  try {
+    const { apiBase, adminAuthHeader } = getAdminCredentials();
+    const [resUsers, resTeams] = await Promise.all([
+      fetch(`${apiBase}/users`, { headers: { Authorization: adminAuthHeader, Accept: "application/json" } }),
+      fetch(`${apiBase}/teams`, { headers: { Authorization: adminAuthHeader, Accept: "application/json" } }),
+    ]);
+
+    if (!resUsers.ok) {
+      const errTxt = await resUsers.text().catch(() => "");
+      return res.status(resUsers.status).json({ success: false, error: `Falha ao buscar usuários: ${errTxt}` });
+    }
+
+    const rawUsers = await resUsers.json();
+    const rawTeams = resTeams.ok ? await resTeams.json() : [];
+
+    const teamsMap = new Map();
+    rawTeams.forEach((t) => teamsMap.set(String(t.id), t));
+
+    const rolesList = storage.getLabelPermissions().map((p) => String(p.label).trim().toLowerCase());
+
+    const enrichedUsers = rawUsers.map((u) => {
+      const team = u.team_id ? teamsMap.get(String(u.team_id)) : null;
+      let rawLabels = [];
+      if (team) {
+        if (Array.isArray(team.labels)) rawLabels = team.labels;
+        else if (team.label) rawLabels = String(team.label).split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+      }
+
+      const uname = (u.username || "").toLowerCase();
+      const filteredLabels = rawLabels.filter((l) => l && l.toLowerCase() !== uname);
+
+      // Determinar papel principal baseado nas labels configuradas
+      let roleLabel = filteredLabels.find((l) => rolesList.includes(l.toLowerCase()));
+      if (!roleLabel) {
+        if (u.roles && u.roles.includes("admin")) roleLabel = "admin";
+        else if (u.roles && u.roles.includes("jury")) roleLabel = "monitor";
+        else roleLabel = "aluno";
+      }
+
+      // Determinar turmas (todas as labels que não são o papel e nem o username)
+      const turmaLabels = filteredLabels.filter((l) => l.toLowerCase() !== roleLabel.toLowerCase());
+
+      return {
+        id: String(u.id || u.username),
+        username: u.username,
+        name: u.name || u.username,
+        email: u.email || null,
+        enabled: u.enabled !== false,
+        roles: u.roles || ["team"],
+        team_id: u.team_id || null,
+        roleLabel,
+        turmaLabels,
+        allLabels: filteredLabels,
+      };
+    });
+
+    const known = storage.getAllKnownLabels();
+    res.json({ success: true, users: enrichedUsers, roles: known.roles, turmas: known.turmas });
+  } catch (err) {
+    console.error("Erro ao listar usuários administrados:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.patch("/api/admin/users/:username", requireAuth, requireUsersPermission, async (req, res) => {
+  try {
+    const { username } = req.params;
+    const { name, email, enabled, password, roleLabel, turmaLabels, turmasLabels } = req.body || {};
+    const { apiBase, adminAuthHeader } = getAdminCredentials();
+
+    const cleanUsername = String(username).trim();
+    const rolesList = storage.getLabelPermissions().map((p) => String(p.label).trim().toLowerCase());
+    const cleanRole = roleLabel ? String(roleLabel).trim().toLowerCase() : "aluno";
+    const turmasInput = turmasLabels || turmaLabels || [];
+    const cleanTurmas = Array.isArray(turmasInput) ? turmasInput.map((t) => String(t).trim()).filter(Boolean) : [];
+
+    // 1. Atualizar ou Criar Time com as novas labels
+    const combinedLabels = [cleanUsername, cleanRole, ...cleanTurmas].filter(Boolean);
+    const labelStr = Array.from(new Set(combinedLabels)).join(", ");
+
+    const teamPayload = [
+      {
+        id: cleanUsername,
+        name: name || cleanUsername,
+        label: labelStr,
+      },
+    ];
+
+    const fdTeams = new FormData();
+    fdTeams.append("json", new Blob([JSON.stringify(teamPayload)], { type: "application/json" }), "teams.json");
+    await fetch(`${apiBase}/users/teams`, {
+      method: "POST",
+      headers: { Authorization: adminAuthHeader },
+      body: fdTeams,
+    });
+
+    // 2. Determinar roles do DOMjudge
+    let roles = ["team"];
+    if (cleanRole === "admin") roles = ["admin", "jury", "team"];
+    else if (cleanRole === "professor" || cleanRole === "monitor") roles = ["jury", "team"];
+
+    const accountPayload = {
+      username: cleanUsername,
+      name: name || cleanUsername,
+      email: email || null,
+      team_id: cleanUsername,
+      roles,
+      enabled: enabled !== false,
+    };
+    if (password && String(password).trim().length >= 6) {
+      accountPayload.password = String(password).trim();
+    }
+
+    const fdAccount = new FormData();
+    fdAccount.append("json", new Blob([JSON.stringify([accountPayload])], { type: "application/json" }), "accounts.json");
+    const resAcc = await fetch(`${apiBase}/users/accounts`, {
+      method: "POST",
+      headers: { Authorization: adminAuthHeader },
+      body: fdAccount,
+    });
+
+    if (!resAcc.ok) {
+      const errTxt = await resAcc.text().catch(() => "");
+      return res.status(resAcc.status).json({ success: false, error: `Falha ao salvar dados do usuário: ${errTxt}` });
+    }
+
+    res.json({ success: true, message: `Usuário '${cleanUsername}' atualizado com sucesso.` });
+  } catch (err) {
+    console.error("Erro ao atualizar usuário:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post("/api/admin/users/batch", requireAuth, requireUsersPermission, async (req, res) => {
+  try {
+    const { usernames, action, value, setRole, addTurmas, removeTurmas, setEnabled } = req.body || {};
+    if (!Array.isArray(usernames) || usernames.length === 0) {
+      return res.status(400).json({ success: false, error: "Nenhum usuário informado para a ação em lote." });
+    }
+
+    const { apiBase, adminAuthHeader } = getAdminCredentials();
+
+    // Obter times atuais do DOMjudge
+    const resTeams = await fetch(`${apiBase}/teams`, {
+      headers: { Authorization: adminAuthHeader, Accept: "application/json" },
+    });
+    const teams = resTeams.ok ? await resTeams.json() : [];
+    const teamsMap = new Map();
+    teams.forEach((t) => teamsMap.set(String(t.id), t));
+
+    const teamsToUpdate = [];
+    const accountsToUpdate = [];
+    const rolesList = storage.getLabelPermissions().map((p) => String(p.label).trim().toLowerCase());
+
+    for (const rawU of usernames) {
+      const u = String(rawU).trim();
+      const existingTeam = teamsMap.get(u);
+      let currentLabels = [];
+      if (existingTeam) {
+        if (Array.isArray(existingTeam.labels)) currentLabels = [...existingTeam.labels];
+        else if (existingTeam.label) currentLabels = String(existingTeam.label).split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+      }
+      if (!currentLabels.includes(u)) currentLabels.unshift(u);
+
+      let teamModified = false;
+
+      // Operações singulares
+      if (action === "add_turma") {
+        const turma = String(value || "").trim();
+        if (turma && !currentLabels.map((l) => l.toLowerCase()).includes(turma.toLowerCase())) {
+          currentLabels.push(turma);
+          teamModified = true;
+        }
+      } else if (action === "remove_turma") {
+        const turma = String(value || "").trim().toLowerCase();
+        currentLabels = currentLabels.filter((l) => l.toLowerCase() !== turma && l.toLowerCase() !== u);
+        currentLabels.unshift(u);
+        teamModified = true;
+      } else if (action === "set_role") {
+        const newRole = String(value || "").trim().toLowerCase();
+        currentLabels = currentLabels.filter((l) => !rolesList.includes(l.toLowerCase()));
+        currentLabels.push(newRole);
+        teamModified = true;
+
+        let roles = ["team"];
+        if (newRole === "admin") roles = ["admin", "jury", "team"];
+        else if (newRole === "professor" || newRole === "monitor") roles = ["jury", "team"];
+
+        accountsToUpdate.push({
+          username: u,
+          name: existingTeam ? existingTeam.name : u,
+          team_id: u,
+          roles,
+        });
+      } else if (action === "set_status") {
+        accountsToUpdate.push({
+          username: u,
+          name: existingTeam ? existingTeam.name : u,
+          team_id: u,
+          enabled: Boolean(value),
+        });
+      }
+
+      // Operações compostas
+      if (addTurmas && Array.isArray(addTurmas)) {
+        for (const t of addTurmas) {
+          const cleanT = String(t).trim();
+          if (cleanT && !currentLabels.map((l) => l.toLowerCase()).includes(cleanT.toLowerCase())) {
+            currentLabels.push(cleanT);
+            teamModified = true;
+          }
+        }
+      }
+
+      if (removeTurmas && Array.isArray(removeTurmas)) {
+        for (const t of removeTurmas) {
+          const cleanT = String(t).trim().toLowerCase();
+          currentLabels = currentLabels.filter((l) => l.toLowerCase() !== cleanT && l.toLowerCase() !== u);
+          currentLabels.unshift(u);
+          teamModified = true;
+        }
+      }
+
+      if (setRole) {
+        const cleanR = String(setRole).trim().toLowerCase();
+        currentLabels = currentLabels.filter((l) => !rolesList.includes(l.toLowerCase()));
+        currentLabels.push(cleanR);
+        teamModified = true;
+
+        let roles = ["team"];
+        if (cleanR === "admin") roles = ["admin", "jury", "team"];
+        else if (cleanR === "professor" || cleanR === "monitor") roles = ["jury", "team"];
+
+        accountsToUpdate.push({
+          username: u,
+          name: existingTeam ? existingTeam.name : u,
+          team_id: u,
+          roles,
+        });
+      }
+
+      if (typeof setEnabled === "boolean") {
+        accountsToUpdate.push({
+          username: u,
+          name: existingTeam ? existingTeam.name : u,
+          team_id: u,
+          enabled: setEnabled,
+        });
+      }
+
+      if (teamModified) {
+        teamsToUpdate.push({
+          id: u,
+          name: existingTeam ? existingTeam.name : u,
+          label: currentLabels.join(", "),
+        });
+      }
+    }
+
+    // Aplicar alterações em times
+    if (teamsToUpdate.length > 0) {
+      const fdTeams = new FormData();
+      fdTeams.append("json", new Blob([JSON.stringify(teamsToUpdate)], { type: "application/json" }), "teams.json");
+      await fetch(`${apiBase}/users/teams`, {
+        method: "POST",
+        headers: { Authorization: adminAuthHeader },
+        body: fdTeams,
+      });
+    }
+
+    // Aplicar alterações em contas
+    if (accountsToUpdate.length > 0) {
+      const fdAccounts = new FormData();
+      fdAccounts.append("json", new Blob([JSON.stringify(accountsToUpdate)], { type: "application/json" }), "accounts.json");
+      await fetch(`${apiBase}/users/accounts`, {
+        method: "POST",
+        headers: { Authorization: adminAuthHeader },
+        body: fdAccounts,
+      });
+    }
+
+    res.json({
+      success: true,
+      updatedCount: usernames.length,
+      message: `Ação em lote '${action}' executada para ${usernames.length} usuários.`,
+    });
+  } catch (err) {
+    console.error("Erro ao executar ação em lote para usuários:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ==============================================================================
 // AUTO-CADASTRO DE USUÁRIO COM CÓDIGO DE ACESSO
 // ==============================================================================
@@ -702,12 +1148,17 @@ function checkDomjudgeProxyPermission(req, res, next) {
   // 4. Studio de Exercícios / Problems
   if (rawSubpath.startsWith("/problems") || rawSubpath === "/problems") {
     if (method === "GET") {
-      if (allowedPages.includes("creator") || allowedPages.includes("contests") || allowedPages.includes("review")) {
+      if (
+        allowedPages.includes("creator") ||
+        allowedPages.includes("problems") ||
+        allowedPages.includes("contests") ||
+        allowedPages.includes("review")
+      ) {
         return next();
       }
     } else {
       // POST, PUT, DELETE em problemas / upload de ZIP
-      if (allowedPages.includes("creator")) {
+      if (allowedPages.includes("creator") || allowedPages.includes("problems")) {
         return next();
       }
     }

@@ -22,6 +22,12 @@ import {
   Sparkles,
   Timer,
   FastForward,
+  Users,
+  Shield,
+  Award,
+  Lock,
+  Tag,
+  HelpCircle,
 } from "lucide-react";
 import {
   UiCard,
@@ -59,24 +65,20 @@ export const ContestManagerView: React.FC = () => {
 
   // Filtros
   const [filterText, setFilterText] = useState("");
-  const [filterEnabled, setFilterEnabled] = useState("all");
-  const [filterChanged, setFilterChanged] = useState("all");
+  const [filterEnabled, setFilterEnabled] = useState<string>("all");
+  const [filterChanged, setFilterChanged] = useState<string>("all");
 
-  // Ações em massa
+  // Edição em Massa
   const [bulkStart, setBulkStart] = useState("");
   const [bulkEnd, setBulkEnd] = useState("");
   const [bulkEnabled, setBulkEnabled] = useState<boolean | null>(null);
   const [bulkScope, setBulkScope] = useState<"page" | "filtered">("page");
 
-  // Paginação & Ordenação
+  // Paginação e Ordenação
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [sortKey, setSortKey] = useState<string>("id");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-
-  // ==============================================================================
-  // ESTADOS DOS MODAIS DE GESTÃO (CRIAÇÃO, DUPLICAÇÃO, QUESTÕES, PRORROGAÇÃO)
-  // ==============================================================================
 
   // 1. Nova Lista
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -89,6 +91,7 @@ export const ContestManagerView: React.FC = () => {
     end_time: "",
     enabled: true,
   });
+  const [newContestAudience, setNewContestAudience] = useState("");
 
   // 2. Duplicar Lista
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
@@ -103,7 +106,7 @@ export const ContestManagerView: React.FC = () => {
     copyProblems: true,
   });
 
-  // 3. Questões Vinculadas
+  // 3. Questões Vinculadas & Autocomplete
   const [isQuestionsModalOpen, setIsQuestionsModalOpen] = useState(false);
   const [targetContestForQuestions, setTargetContestForQuestions] = useState<Contest | null>(null);
   const [contestProblems, setContestProblems] = useState<Problem[]>([]);
@@ -115,11 +118,28 @@ export const ContestManagerView: React.FC = () => {
   const [isUploadingProbZip, setIsUploadingProbZip] = useState(false);
   const zipInputRef = useRef<HTMLInputElement>(null);
 
+  // Autocomplete do Banco de Questões
+  const [availableBankProblems, setAvailableBankProblems] = useState<any[]>([]);
+  const [probSearchQuery, setProbSearchQuery] = useState("");
+  const [isProbDropdownOpen, setIsProbDropdownOpen] = useState(false);
+
   // 4. Prorrogação Rápida de Prazo
   const [isExtendModalOpen, setIsExtendModalOpen] = useState(false);
   const [targetContestForExtend, setTargetContestForExtend] = useState<Contest | null>(null);
   const [customExtendDatetime, setCustomExtendDatetime] = useState("");
   const [isExtending, setIsExtending] = useState(false);
+
+  // 5. Regras de Público-Alvo por Labels
+  const [knownLabels, setKnownLabels] = useState<{ roles: string[]; turmas: string[]; all: string[] }>({
+    roles: [],
+    turmas: [],
+    all: [],
+  });
+  const [isAudienceModalOpen, setIsAudienceModalOpen] = useState(false);
+  const [targetContestForAudience, setTargetContestForAudience] = useState<Contest | null>(null);
+  const [editingAudienceRule, setEditingAudienceRule] = useState("");
+  const [isSavingAudience, setIsSavingAudience] = useState(false);
+  const [contestAudienceMap, setContestAudienceMap] = useState<Record<string, string>>({});
 
   const api = useMemo(() => new DomjudgeApiService(credentials), [credentials]);
 
@@ -147,7 +167,12 @@ export const ContestManagerView: React.FC = () => {
     if (!isAuthenticated) return;
     setLoading(true);
     try {
-      const data = await api.getContests();
+      const [data, audienceRes, labelsRes] = await Promise.all([
+        api.getContests(),
+        api.getContestAudience().catch(() => ({ rules: {} })),
+        api.getAllLabels().catch(() => ({ roles: [], turmas: [], all: [] })),
+      ]);
+
       const enriched: Contest[] = data.map((c) => ({
         ...c,
         _original: {
@@ -158,6 +183,12 @@ export const ContestManagerView: React.FC = () => {
         _changed: false,
       }));
       setContests(enriched);
+      if (audienceRes && audienceRes.rules) {
+        setContestAudienceMap(audienceRes.rules);
+      }
+      if (labelsRes) {
+        setKnownLabels(labelsRes);
+      }
       showToast(`${enriched.length} listas de exercícios carregadas!`, "success");
     } catch (err: any) {
       console.error(err);
@@ -336,6 +367,7 @@ export const ContestManagerView: React.FC = () => {
       end_time: toLocalInputFormat(nextWeek),
       enabled: true,
     });
+    setNewContestAudience("");
     setIsCreateModalOpen(true);
   };
 
@@ -359,6 +391,11 @@ export const ContestManagerView: React.FC = () => {
         end_time: formatIsoForDomjudge(endDate),
         enabled: newContest.enabled,
       });
+
+      if (newContestAudience.trim()) {
+        await api.saveContestAudience(newContest.id.trim(), newContestAudience.trim()).catch(console.error);
+        setContestAudienceMap((prev) => ({ ...prev, [newContest.id.trim()]: newContestAudience.trim() }));
+      }
 
       showToast(`Lista de exercícios '${newContest.name}' criada com sucesso!`, "success");
       setIsCreateModalOpen(false);
@@ -439,11 +476,16 @@ export const ContestManagerView: React.FC = () => {
     setIsQuestionsModalOpen(true);
     setLoadingProblems(true);
     setAddProbId("");
+    setProbSearchQuery("");
     setAddProbLabel("A");
 
     try {
-      const problems = await api.getProblems(contest.id);
+      const [problems, bank] = await Promise.all([
+        api.getProblems(contest.id),
+        api.getProblemBank().catch(() => []),
+      ]);
       setContestProblems(problems || []);
+      setAvailableBankProblems(bank || []);
     } catch (err: any) {
       console.error(err);
       showToast("Não foi possível carregar as questões desta lista.", "error");
@@ -590,6 +632,34 @@ export const ContestManagerView: React.FC = () => {
   };
 
   // ==============================================================================
+  // 5. GERENCIAR PÚBLICO-ALVO (LABELS & REGRAS BOOLEANAS)
+  // ==============================================================================
+  const handleOpenAudienceModal = (contest: Contest) => {
+    setTargetContestForAudience(contest);
+    setEditingAudienceRule(contestAudienceMap[contest.id] || "");
+    setIsAudienceModalOpen(true);
+  };
+
+  const handleSaveAudienceModal = async () => {
+    if (!targetContestForAudience) return;
+    setIsSavingAudience(true);
+    try {
+      await api.saveContestAudience(targetContestForAudience.id, editingAudienceRule.trim());
+      setContestAudienceMap((prev) => ({
+        ...prev,
+        [targetContestForAudience.id]: editingAudienceRule.trim(),
+      }));
+      showToast(`Regra de público da lista '${targetContestForAudience.name}' atualizada!`, "success");
+      setIsAudienceModalOpen(false);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.message || "Erro ao salvar regra de público.", "error");
+    } finally {
+      setIsSavingAudience(false);
+    }
+  };
+
+  // ==============================================================================
   // COLUNAS DA TABELA
   // ==============================================================================
   const columns: Column<Contest>[] = [
@@ -614,7 +684,7 @@ export const ContestManagerView: React.FC = () => {
     {
       key: "questions",
       title: "Questões",
-      width: "120px",
+      width: "110px",
       align: "center",
       render: (c) => (
         <UiButton
@@ -627,6 +697,32 @@ export const ContestManagerView: React.FC = () => {
           Questões
         </UiButton>
       ),
+    },
+    {
+      key: "audience",
+      title: "Público",
+      width: "130px",
+      align: "center",
+      render: (c) => {
+        const rule = contestAudienceMap[c.id];
+        return (
+          <UiButton
+            size="sm"
+            variant={rule ? "secondary" : "dim"}
+            icon={<Users size={13} />}
+            onClick={() => handleOpenAudienceModal(c)}
+            title="Configurar restrição de público por labels (turmas, monitoria, etc.)"
+          >
+            {rule ? (
+              <span className="font-mono text-xs" style={{ maxWidth: 75, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block" }}>
+                {rule}
+              </span>
+            ) : (
+              "Todos"
+            )}
+          </UiButton>
+        );
+      },
     },
     {
       key: "start_time",
@@ -1074,6 +1170,49 @@ export const ContestManagerView: React.FC = () => {
             onChange={(val) => setNewContest((prev) => ({ ...prev, enabled: val }))}
             label={newContest.enabled ? "Lista Aberta (alunos podem submeter imediatamente)" : "Lista Encerrada / Oculta"}
           />
+
+          {/* Padrão Educacional & Público-Alvo */}
+          <UiCard variant="subtle">
+            <UiStack gap={6}>
+              <UiFlex gap={6} align="center">
+                <Shield size={16} className="text-brand" />
+                <span className="font-bold text-xs">Padrão Educacional Ativo</span>
+              </UiFlex>
+              <p className="text-xs text-muted">
+                Configurado automaticamente para uso em sala de aula: <strong>sem balões</strong>, <strong>sem placar público</strong> (visível apenas para professores/admins), <strong>sem medalhas</strong> e sem penalidade de tempo agressiva.
+              </p>
+            </UiStack>
+          </UiCard>
+
+          <UiStack gap={6}>
+            <UiFlex justify="between" align="center">
+              <span className="text-xs font-semibold">Regra de Público-Alvo por Labels (Opcional):</span>
+              <span className="text-xs text-muted font-mono">AND, OR, NOT, ( )</span>
+            </UiFlex>
+            <UiTextInput
+              placeholder="Ex: turma-2026-1 AND NOT monitor"
+              value={newContestAudience}
+              onChange={(e) => setNewContestAudience(e.target.value)}
+            />
+            {knownLabels.all.length > 0 && (
+              <UiFlex gap={6} wrap align="center">
+                <span className="text-xs text-muted">Inserir label:</span>
+                {knownLabels.all.slice(0, 10).map((lb) => (
+                  <UiBadge
+                    key={lb}
+                    variant="neutral"
+                    size="sm"
+                    className="cursor-pointer hover:border-brand"
+                    onClick={() => {
+                      setNewContestAudience((prev) => (prev ? `${prev} AND ${lb}` : lb));
+                    }}
+                  >
+                    +{lb}
+                  </UiBadge>
+                ))}
+              </UiFlex>
+            )}
+          </UiStack>
         </UiStack>
       </UiModal>
 
@@ -1270,15 +1409,91 @@ export const ContestManagerView: React.FC = () => {
 
             <UiCardContent>
               <UiStack gap={14}>
-                {/* Opção 1: Vincular por ID */}
+                {/* Opção 1: Vincular por ID com Autocomplete do Banco de Questões */}
                 <UiFlex gap={10} align="end" wrap>
-                  <div style={{ flex: "1 1 200px" }}>
+                  <div style={{ flex: "1 1 260px", position: "relative" }}>
                     <UiTextInput
-                      label="Identificador / Slug da Questão"
-                      placeholder="ex: arvore-binaria ou soma-dois-numeros"
-                      value={addProbId}
-                      onChange={(e) => setAddProbId(e.target.value)}
+                      label="Buscar ou Digitar ID da Questão (Autocomplete)"
+                      placeholder="Digite o título ou slug do exercício..."
+                      value={probSearchQuery || addProbId}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setProbSearchQuery(val);
+                        setAddProbId(val);
+                        setIsProbDropdownOpen(true);
+                      }}
+                      onFocus={() => setIsProbDropdownOpen(true)}
                     />
+                    {isProbDropdownOpen && availableBankProblems.length > 0 && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "100%",
+                          left: 0,
+                          right: 0,
+                          zIndex: 60,
+                          background: "var(--bg-card)",
+                          border: "1px solid var(--border-color)",
+                          borderRadius: 8,
+                          boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
+                          maxHeight: 220,
+                          overflowY: "auto",
+                          marginTop: 4,
+                        }}
+                      >
+                        {availableBankProblems
+                          .filter((p) => {
+                            const q = (probSearchQuery || "").toLowerCase();
+                            if (!q) return true;
+                            return (
+                              p.id?.toLowerCase().includes(q) ||
+                              p.name?.toLowerCase().includes(q) ||
+                              p.shortname?.toLowerCase().includes(q)
+                            );
+                          })
+                          .slice(0, 15)
+                          .map((p) => (
+                            <div
+                              key={p.id}
+                              style={{
+                                padding: "8px 12px",
+                                cursor: "pointer",
+                                borderBottom: "1px solid var(--border-subtle)",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                              className="hover:bg-subtle"
+                              onClick={() => {
+                                setAddProbId(p.id);
+                                setProbSearchQuery(p.name ? `${p.name} (${p.id})` : p.id);
+                                setIsProbDropdownOpen(false);
+                              }}
+                            >
+                              <UiStack gap={2}>
+                                <span className="font-bold text-sm">{p.name || p.id}</span>
+                                <span className="font-mono text-xs text-muted">{p.id}</span>
+                              </UiStack>
+                              <UiBadge variant="neutral" size="sm">
+                                {p.time_limit ? `${p.time_limit}s` : "1.0s"}
+                              </UiBadge>
+                            </div>
+                          ))}
+                        <div
+                          style={{
+                            padding: "6px 12px",
+                            textAlign: "center",
+                            fontSize: "11px",
+                            color: "var(--text-muted)",
+                            background: "var(--bg-subtle)",
+                            cursor: "pointer",
+                          }}
+                          onClick={() => setIsProbDropdownOpen(false)}
+                        >
+                          ✕ Fechar sugestões
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ width: "90px" }}>
@@ -1473,6 +1688,146 @@ export const ContestManagerView: React.FC = () => {
                 Criar Lista "Tempo Extra"
               </UiButton>
             </UiFlex>
+          )}
+        </UiStack>
+      </UiModal>
+
+      {/* ============================================================================== */}
+      {/* 5. MODAL DE CONFIGURAÇÃO DE PÚBLICO-ALVO (LABELS & BOOLEAN EXPR) */}
+      {/* ============================================================================== */}
+      <UiModal
+        isOpen={isAudienceModalOpen}
+        onClose={() => setIsAudienceModalOpen(false)}
+        title={
+          <UiFlex gap={8} align="center">
+            <Users className="text-brand" size={20} />
+            <span>Restrição de Público-Alvo: {targetContestForAudience?.name}</span>
+          </UiFlex>
+        }
+        subtitle="Defina quais alunos/usuários têm acesso a esta lista com expressões booleanas (AND, OR, NOT e parênteses)."
+        size="lg"
+        footer={
+          <UiFlex justify="between" align="center" style={{ width: "100%" }}>
+            <UiButton
+              variant="dim"
+              size="sm"
+              onClick={() => setEditingAudienceRule("")}
+              title="Limpar regra para permitir todos os usuários cadastrados"
+            >
+              Permitir Todos (Sem restrição)
+            </UiButton>
+            <UiFlex gap={10}>
+              <UiButton variant="dim" onClick={() => setIsAudienceModalOpen(false)}>
+                Cancelar
+              </UiButton>
+              <UiButton
+                variant="primary"
+                onClick={handleSaveAudienceModal}
+                loading={isSavingAudience}
+                icon={<Save size={15} />}
+              >
+                Salvar Regra de Público
+              </UiButton>
+            </UiFlex>
+          </UiFlex>
+        }
+      >
+        <UiStack gap={16}>
+          <UiCard variant="subtle">
+            <UiStack gap={6}>
+              <span className="text-xs font-bold text-brand">Como funcionam as regras de público:</span>
+              <p className="text-xs text-muted">
+                O Wizard avalia as <strong>labels do time/usuário</strong> no DOMjudge. Use <code>AND</code>, <code>OR</code>, <code>NOT</code> e parênteses <code>( )</code>. Deixar vazio libera a lista para todos os usuários matriculados.
+              </p>
+              <p className="text-xs font-mono text-muted">
+                Exemplo: (turma-2026-1 OR turma-2026-2) AND NOT monitoria
+              </p>
+            </UiStack>
+          </UiCard>
+
+          <UiTextInput
+            label="Expressão Booleana de Labels"
+            placeholder="Ex: turma-a AND NOT monitor"
+            value={editingAudienceRule}
+            onChange={(e) => setEditingAudienceRule(e.target.value)}
+          />
+
+          {/* Operadores Rápidos */}
+          <UiFlex gap={6} align="center" wrap>
+            <span className="text-xs text-muted font-semibold">Operadores:</span>
+            {["AND", "OR", "NOT", "(", ")"].map((op) => (
+              <UiButton
+                key={op}
+                size="sm"
+                variant="dim"
+                onClick={() => {
+                  setEditingAudienceRule((prev) => {
+                    const trimmed = prev.trim();
+                    if (!trimmed) return op;
+                    if (op === ")" || op === "(") return `${prev} ${op}`;
+                    return `${trimmed} ${op} `;
+                  });
+                }}
+              >
+                {op}
+              </UiButton>
+            ))}
+          </UiFlex>
+
+          {/* Turmas Conhecidas */}
+          {knownLabels.turmas.length > 0 && (
+            <UiStack gap={6}>
+              <span className="text-xs text-muted font-semibold">Turmas Cadastradas:</span>
+              <UiFlex gap={6} wrap>
+                {knownLabels.turmas.map((t) => (
+                  <UiBadge
+                    key={t}
+                    variant="brand"
+                    size="sm"
+                    className="cursor-pointer hover:opacity-80"
+                    onClick={() => {
+                      setEditingAudienceRule((prev) => {
+                        const trimmed = prev.trim();
+                        if (!trimmed || trimmed.endsWith("(") || trimmed.endsWith("AND") || trimmed.endsWith("OR") || trimmed.endsWith("NOT")) {
+                          return `${prev} ${t}`.trim();
+                        }
+                        return `${trimmed} AND ${t}`;
+                      });
+                    }}
+                  >
+                    +{t}
+                  </UiBadge>
+                ))}
+              </UiFlex>
+            </UiStack>
+          )}
+
+          {/* Papéis Conhecidos */}
+          {knownLabels.roles.length > 0 && (
+            <UiStack gap={6}>
+              <span className="text-xs text-muted font-semibold">Papéis do Sistema:</span>
+              <UiFlex gap={6} wrap>
+                {knownLabels.roles.map((r) => (
+                  <UiBadge
+                    key={r}
+                    variant="neutral"
+                    size="sm"
+                    className="cursor-pointer hover:border-brand"
+                    onClick={() => {
+                      setEditingAudienceRule((prev) => {
+                        const trimmed = prev.trim();
+                        if (!trimmed || trimmed.endsWith("(") || trimmed.endsWith("AND") || trimmed.endsWith("OR") || trimmed.endsWith("NOT")) {
+                          return `${prev} ${r}`.trim();
+                        }
+                        return `${trimmed} AND ${r}`;
+                      });
+                    }}
+                  >
+                    +{r}
+                  </UiBadge>
+                ))}
+              </UiFlex>
+            </UiStack>
           )}
         </UiStack>
       </UiModal>

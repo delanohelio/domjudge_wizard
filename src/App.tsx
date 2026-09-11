@@ -19,6 +19,7 @@ import { CommandPalette } from "@/components/layout/CommandPalette";
 import { ReviewView } from "@/views/ReviewView";
 import { CreatorView } from "@/views/CreatorView";
 import { ContestManagerView } from "@/views/ContestManagerView";
+import { ProblemsListView } from "@/views/ProblemsListView";
 import { UserManagerView } from "@/views/UserManagerView";
 import { ChangePasswordView } from "@/views/ChangePasswordView";
 import { AccessCodesView } from "@/views/AccessCodesView";
@@ -95,9 +96,10 @@ export const App: React.FC = () => {
   const allNavTabs = [
     { id: "review", label: "Acompanhamento & Entregas" },
     { id: "contests", label: "Listas de Exercícios" },
+    { id: "problems", label: "Banco de Questões" },
     { id: "creator", label: "Studio de Exercícios" },
     { id: "codes", label: "Inscrições & Turmas" },
-    { id: "users", label: "Alunos Matriculados" },
+    { id: "users", label: "Usuários Cadastrados" },
     { id: "permissions", label: "Papéis & Permissões" },
     { id: "trocar-senha", label: "Trocar Senha" },
   ];
@@ -283,8 +285,14 @@ export const App: React.FC = () => {
 
           <div key={activeTab} className="edu-view-container view-enter">
             {activeTab === "review" && canAccessPage("review") && <ReviewView />}
-            {activeTab === "creator" && canAccessPage("creator") && <CreatorView />}
             {activeTab === "contests" && canAccessPage("contests") && <ContestManagerView />}
+            {activeTab === "problems" && canAccessPage("problems") && (
+              <ProblemsListView
+                credentials={user ? { baseUrl: "", username: user.username } : undefined}
+                isAuthenticated={isAuthenticated}
+              />
+            )}
+            {activeTab === "creator" && canAccessPage("creator") && <CreatorView />}
             {activeTab === "users" && canAccessPage("users") && <UserManagerView />}
             {activeTab === "codes" && canAccessPage("codes") && <AccessCodesView />}
             {activeTab === "permissions" && canAccessPage("permissions") && <LabelPermissionsView />}

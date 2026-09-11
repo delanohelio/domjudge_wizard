@@ -1,0 +1,21 @@
+[
+  {
+    "id": "soma-didatica",
+    "title": "Soma de Dois Inteiros Didática",
+    "name": "Soma de Dois Inteiros Didática",
+    "timeLimit": 1,
+    "memoryLimit": 512,
+    "markdownContent": "",
+    "testCases": [
+      {
+        "id": "1",
+        "type": "sample",
+        "input": "2 3\n",
+        "output": "5\n"
+      }
+    ],
+    "linkedContests": [],
+    "createdAt": "2026-09-11T14:22:47.124Z",
+    "updatedAt": "2026-09-11T14:22:47.124Z"
+  }
+]

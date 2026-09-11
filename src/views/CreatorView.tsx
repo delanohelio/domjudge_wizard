@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   FileUp,
   FileDown,
@@ -80,6 +80,30 @@ export const CreatorView: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Carregar exercício para edição vindo do Banco de Questões
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem("wizard_edit_problem");
+      if (stored) {
+        sessionStorage.removeItem("wizard_edit_problem");
+        const parsed = JSON.parse(stored);
+        if (parsed.title) setTitle(parsed.title);
+        if (parsed.id || parsed.problemId) {
+          setProblemId(parsed.id || parsed.problemId);
+          setIsEditMode(true);
+        }
+        if (parsed.time_limit || parsed.timeLimit) setTimeLimit(Number(parsed.time_limit || parsed.timeLimit));
+        if (parsed.memory_limit || parsed.memoryLimit) setMemoryLimit(Number(parsed.memory_limit || parsed.memoryLimit));
+        if (parsed.markdown || parsed.markdownContent) setMarkdown(parsed.markdown || parsed.markdownContent);
+        if (Array.isArray(parsed.testCases) && parsed.testCases.length > 0) setTestCases(parsed.testCases);
+        if (parsed.contestId) setTargetContestId(parsed.contestId);
+        showToast(`Exercício '${parsed.title || parsed.id}' carregado no Studio para edição!`, "info");
+      }
+    } catch (e) {
+      console.warn("Aviso ao carregar exercício do sessionStorage:", e);
+    }
+  }, [showToast]);
 
   // Modelos Pedagógicos Rápidos
   const applyTemplate = (templateKey: string) => {
@@ -368,6 +392,19 @@ export const CreatorView: React.FC = () => {
       });
 
       await api.uploadProblemZip(targetContestId || null, zipBlob, problemId);
+
+      // Salvar no Banco Central do Wizard para listagem, edição rápida e autocomplete
+      await api.saveProblemToBank({
+        id: problemId,
+        title,
+        name: title,
+        timeLimit,
+        memoryLimit,
+        markdownContent: markdown,
+        testCases,
+        linkedContests: targetContestId ? [targetContestId] : [],
+      }).catch((e) => console.warn("Aviso ao salvar no banco local:", e));
+
       showToast(
         isUnlinked
           ? `Exercício '${title}' cadastrado com sucesso no Banco Geral do DOMjudge!`

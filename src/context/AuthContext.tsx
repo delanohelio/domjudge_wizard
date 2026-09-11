@@ -262,8 +262,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isAdmin: true,
       allowedPages: [
         "review",
-        "creator",
         "contests",
+        "problems",
+        "creator",
         "users",
         "codes",
         "permissions",

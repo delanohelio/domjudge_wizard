@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { TestCase } from "@/types/domjudge";
+import { generateProblemHtml, generateProblemPdf } from "./pdfService";
 
 export interface ProblemZipData {
   title: string;
@@ -8,6 +9,7 @@ export interface ProblemZipData {
   memoryLimit: number;
   markdownContent: string;
   testCases: TestCase[];
+  htmlContent?: string | null;
   pdfBlob?: Blob | null;
   includePdf?: boolean;
 }
@@ -35,9 +37,43 @@ color = '#6366f1'
     zip.file("statement.md", data.markdownContent);
   }
 
-  // 4. problem.pdf (se fornecido)
-  if (data.pdfBlob) {
-    zip.file("problem.pdf", data.pdfBlob);
+  // 4. problem.html (gerado a partir do Markdown com KaTeX e estilos)
+  let htmlContent = data.htmlContent;
+  if (!htmlContent && data.markdownContent) {
+    try {
+      htmlContent = await generateProblemHtml({
+        title: data.title,
+        problemId: data.problemId,
+        timeLimit: data.timeLimit,
+        memoryLimit: data.memoryLimit,
+        markdownContent: data.markdownContent,
+      });
+    } catch (e) {
+      console.warn("Aviso ao gerar problem.html para o ZIP:", e);
+    }
+  }
+  if (htmlContent) {
+    zip.file("problem.html", htmlContent);
+  }
+
+  // 5. problem.pdf (gera via Puppeteer se não fornecido)
+  let pdfBlob = data.pdfBlob;
+  if (!pdfBlob && data.includePdf !== false) {
+    try {
+      pdfBlob = await generateProblemPdf({
+        title: data.title,
+        problemId: data.problemId,
+        timeLimit: data.timeLimit,
+        memoryLimit: data.memoryLimit,
+        markdownContent: data.markdownContent,
+        htmlContent: htmlContent || undefined,
+      });
+    } catch (e) {
+      console.warn("Aviso ao gerar problem.pdf para o ZIP:", e);
+    }
+  }
+  if (pdfBlob) {
+    zip.file("problem.pdf", pdfBlob);
   }
 
   // 5. Casos de Teste (data/sample e data/secret)
@@ -73,6 +109,7 @@ export interface ParsedProblemZip {
   timeLimit?: number;
   memoryLimit?: number;
   markdownContent?: string;
+  htmlContent?: string;
   testCases: TestCase[];
 }
 
@@ -83,10 +120,11 @@ export async function parseProblemZip(file: File): Promise<ParsedProblemZip> {
   let timeLimit: number | undefined;
   let memoryLimit: number | undefined;
   let markdownContent: string | undefined;
+  let htmlContent: string | undefined;
 
   const allFiles = Object.keys(zip.files);
 
-  // 1. Procurar statement.md ou similar (ignorando problem.html e outros formatos)
+  // 1. Procurar statement.md ou similar (com fallback para problem.html se não houver md)
   const statementCandidates = allFiles.filter((f) => {
     const lower = f.toLowerCase();
     return (
@@ -113,6 +151,12 @@ export async function parseProblemZip(file: File): Promise<ParsedProblemZip> {
     if (mdFile) {
       markdownContent = await mdFile.async("string");
     }
+  }
+
+  // Se não houver Markdown, verificar se há problem.html
+  const htmlFile = zip.file("problem.html") || zip.file("statement.html");
+  if (htmlFile) {
+    htmlContent = await htmlFile.async("string");
   }
 
   // 2. Ler problem.yaml se existir
